@@ -1,11 +1,11 @@
 [workspace]
 members = [
     "contracts/reputation-contract",
+    "contracts/creditline-contract",
 ]
 resolver = "2"
 
 # Future contracts:
-# - contracts/creditline-contract
 # - contracts/merchant-registry-contract
 # - contracts/adapter-trustless-contract
 
