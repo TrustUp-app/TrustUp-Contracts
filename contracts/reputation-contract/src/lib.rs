@@ -38,10 +38,13 @@ impl ReputationContract {
         let new_score = old_score
             .checked_add(amount)
             .ok_or_else(|| ReputationError::Overflow)
+            .map_err(|e| {
+                soroban_sdk::panic_with_error!(&env, e);
+            })
             .unwrap();
 
         if new_score > types::MAX_SCORE {
-            soroban_sdk::panic_with_error!(&env, ReputationError::OutOfBounds);
+            soroban_sdk::panic_with_error!(&env, ReputationError::Overflow);
         }
 
         storage::write_score(&env, &user, new_score);
@@ -60,10 +63,13 @@ impl ReputationContract {
         let new_score = old_score
             .checked_sub(amount)
             .ok_or_else(|| ReputationError::Underflow)
+            .map_err(|e| {
+                soroban_sdk::panic_with_error!(&env, e);
+            })
             .unwrap();
 
         if new_score < types::MIN_SCORE {
-            soroban_sdk::panic_with_error!(&env, ReputationError::OutOfBounds);
+            soroban_sdk::panic_with_error!(&env, ReputationError::Underflow);
         }
 
         storage::write_score(&env, &user, new_score);

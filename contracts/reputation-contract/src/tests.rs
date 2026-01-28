@@ -247,3 +247,244 @@ fn it_gets_version() {
     assert_eq!(version, symbol_short!("v1_0_0"));
 }
 
+/// Test: Revokes updater access after removal
+/// Verifies full lifecycle: grant -> modify -> revoke -> ensure NotUpdater error
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn it_revokes_updater_access_after_removal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Updater can update initially
+    client.set_score(&updater, &user, &20);
+    assert_eq!(client.get_score(&user), 20);
+
+    // Revoke updater access
+    client.set_updater(&admin, &updater, &false);
+    assert_eq!(client.is_updater(&updater), false);
+
+    // Former updater should no longer be able to increase the score (should panic NotUpdater)
+    client.increase_score(&updater, &user, &5);
+}
+
+/// Test: Emitted event on updater removal
+/// Verifies that UPDCHGD event can be emitted when removing updater
+#[test]
+fn it_emits_event_on_updater_removal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    // Grant updater
+    client.set_updater(&admin, &updater, &true);
+    assert_eq!(client.is_updater(&updater), true);
+
+    // Revoke updater (this should emit UPDCHGD event with false)
+    client.set_updater(&admin, &updater, &false);
+    assert_eq!(client.is_updater(&updater), false);
+
+    // If we reached here without panic, event emission didn't crash
+}
+
+/// Test: Removing a non-existent updater should not panic and should be handled gracefully
+#[test]
+fn it_handles_removing_non_existent_updater() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let never_added = Address::generate(&env);
+
+    // Removing a never-added updater should not panic
+    client.set_updater(&admin, &never_added, &false);
+    assert_eq!(client.is_updater(&never_added), false);
+}
+
+/// Overflow/Underflow tests
+/// Verifies contract returns correct errors for arithmetic edge cases
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn it_prevents_overflow_on_increase() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    client.set_score(&updater, &user, &80);
+    // increase by 50 would overflow beyond 100
+    client.increase_score(&updater, &user, &50);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn it_prevents_overflow_at_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    client.set_score(&updater, &user, &100);
+    // increase by 1 when at max should overflow
+    client.increase_score(&updater, &user, &1);
+}
+
+#[test]
+fn it_allows_increase_up_to_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    client.set_score(&updater, &user, &80);
+    client.increase_score(&updater, &user, &20);
+    assert_eq!(client.get_score(&user), 100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn it_prevents_underflow_on_decrease() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    client.set_score(&updater, &user, &30);
+    // decrease by 50 would underflow below 0
+    client.decrease_score(&updater, &user, &50);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn it_prevents_underflow_at_min() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    client.set_score(&updater, &user, &0);
+    // decrease by 1 at zero should underflow
+    client.decrease_score(&updater, &user, &1);
+}
+
+#[test]
+fn it_allows_decrease_down_to_min() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    client.set_score(&updater, &user, &30);
+    client.decrease_score(&updater, &user, &30);
+    assert_eq!(client.get_score(&user), 0);
+}
+
+/// Test: Removing one updater doesn't affect other updaters
+#[test]
+fn it_removing_one_updater_does_not_affect_others() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater1 = Address::generate(&env);
+    let updater2 = Address::generate(&env);
+    client.set_updater(&admin, &updater1, &true);
+    client.set_updater(&admin, &updater2, &true);
+
+    let user = Address::generate(&env);
+
+    // updater1 increases score
+    client.set_score(&updater1, &user, &10);
+    client.increase_score(&updater1, &user, &5);
+    assert_eq!(client.get_score(&user), 15);
+
+    // Revoke updater1
+    client.set_updater(&admin, &updater1, &false);
+    assert_eq!(client.is_updater(&updater1), false);
+    assert_eq!(client.is_updater(&updater2), true);
+
+    // updater2 should still be able to update
+    client.increase_score(&updater2, &user, &5);
+    assert_eq!(client.get_score(&user), 20);
+}
+
