@@ -2,11 +2,11 @@
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
 
 // Module imports
-mod types;
-mod storage;
 mod access;
-mod events;
 mod errors;
+mod events;
+mod storage;
+mod types;
 
 // Re-export types for external use
 pub use errors::ReputationError;
@@ -37,7 +37,7 @@ impl ReputationContract {
         let old_score = storage::read_score(&env, &user);
         let new_score = old_score
             .checked_add(amount)
-            .ok_or_else(|| ReputationError::Overflow)
+            .ok_or(ReputationError::Overflow)
             .unwrap();
 
         if new_score > types::MAX_SCORE {
@@ -45,7 +45,7 @@ impl ReputationContract {
         }
 
         storage::write_score(&env, &user, new_score);
-        
+
         let reason = symbol_short!("increase");
         events::emit_score_changed(&env, &user, old_score, new_score, &reason);
     }
@@ -59,15 +59,11 @@ impl ReputationContract {
         let old_score = storage::read_score(&env, &user);
         let new_score = old_score
             .checked_sub(amount)
-            .ok_or_else(|| ReputationError::Underflow)
+            .ok_or(ReputationError::Underflow)
             .unwrap();
 
-        if new_score < types::MIN_SCORE {
-            soroban_sdk::panic_with_error!(&env, ReputationError::OutOfBounds);
-        }
-
         storage::write_score(&env, &user, new_score);
-        
+
         let reason = symbol_short!("decrease");
         events::emit_score_changed(&env, &user, old_score, new_score, &reason);
     }
@@ -78,13 +74,13 @@ impl ReputationContract {
         updater.require_auth();
         access::require_updater(&env, &updater);
 
-        if new_score < types::MIN_SCORE || new_score > types::MAX_SCORE {
+        if new_score > types::MAX_SCORE {
             soroban_sdk::panic_with_error!(&env, ReputationError::OutOfBounds);
         }
 
         let old_score = storage::read_score(&env, &user);
         storage::write_score(&env, &user, new_score);
-        
+
         let reason = symbol_short!("set");
         events::emit_score_changed(&env, &user, old_score, new_score, &reason);
     }
@@ -94,7 +90,7 @@ impl ReputationContract {
     pub fn set_updater(env: Env, admin: Address, updater: Address, allowed: bool) {
         admin.require_auth();
         access::require_admin(&env, &admin);
-        
+
         storage::set_updater(&env, &updater, allowed);
         events::emit_updater_changed(&env, &updater, allowed);
     }
@@ -108,7 +104,7 @@ impl ReputationContract {
     /// Requires authorization from current admin (or allows initial setup)
     pub fn set_admin(env: Env, new_admin: Address) {
         let old_admin_opt: Option<Address> = env.storage().instance().get(&storage::ADMIN_KEY);
-        
+
         if let Some(old_admin) = old_admin_opt {
             // Admin exists, require current admin authorization
             old_admin.require_auth();

@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use crate::{CreditLineContract, CreditLineContractClient, LoanStatus, RepaymentInstallment};
 use soroban_sdk::{
     contract, contractimpl,

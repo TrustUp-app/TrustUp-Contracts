@@ -11,4 +11,3 @@ pub enum ReputationError {
     Overflow = 4,
     Underflow = 5,
 }
-

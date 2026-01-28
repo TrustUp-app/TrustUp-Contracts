@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
 use crate::ReputationContract;
@@ -12,13 +10,13 @@ use crate::ReputationContractClient;
 fn it_sets_admin() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let retrieved_admin = client.get_admin();
     assert_eq!(retrieved_admin, admin);
 }
@@ -30,13 +28,13 @@ fn it_sets_admin() {
 fn it_gets_admin() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let retrieved = client.get_admin();
     assert_eq!(retrieved, admin);
 }
@@ -48,17 +46,17 @@ fn it_gets_admin() {
 fn it_sets_updater() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
-    assert_eq!(client.is_updater(&updater), true);
+
+    assert!(client.is_updater(&updater));
 }
 
 /// Test: Checks updater permissions
@@ -68,20 +66,20 @@ fn it_sets_updater() {
 fn it_checks_updater() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     let non_updater = Address::generate(&env);
-    
+
     client.set_updater(&admin, &updater, &true);
-    
-    assert_eq!(client.is_updater(&updater), true);
-    assert_eq!(client.is_updater(&non_updater), false);
+
+    assert!(client.is_updater(&updater));
+    assert!(!client.is_updater(&non_updater));
 }
 
 /// Test: Gets the reputation score
@@ -91,21 +89,21 @@ fn it_checks_updater() {
 fn it_gets_score() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
-    
+
     // New user should have score 0
     assert_eq!(client.get_score(&user), 0);
-    
+
     // Set score and verify
     client.set_score(&updater, &user, &50);
     assert_eq!(client.get_score(&user), 50);
@@ -118,21 +116,21 @@ fn it_gets_score() {
 fn it_increases_score() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
-    
+
     client.set_score(&updater, &user, &50);
     client.increase_score(&updater, &user, &20);
-    
+
     assert_eq!(client.get_score(&user), 70);
 }
 
@@ -143,21 +141,21 @@ fn it_increases_score() {
 fn it_decreases_score() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
-    
+
     client.set_score(&updater, &user, &50);
     client.decrease_score(&updater, &user, &20);
-    
+
     assert_eq!(client.get_score(&user), 30);
 }
 
@@ -168,21 +166,21 @@ fn it_decreases_score() {
 fn it_sets_score() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
-    
+
     client.set_score(&updater, &user, &75);
     assert_eq!(client.get_score(&user), 75);
-    
+
     client.set_score(&updater, &user, &25);
     assert_eq!(client.get_score(&user), 25);
 }
@@ -194,17 +192,17 @@ fn it_sets_score() {
 #[should_panic(expected = "Error(Contract, #2)")]
 fn it_prevents_unauthorized_updates() {
     let env = Env::default();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     env.mock_all_auths();
     client.set_admin(&admin);
-    
+
     let user = Address::generate(&env);
     let unauthorized = Address::generate(&env);
-    
+
     // Try to update score without being an updater (should panic)
     client.mock_all_auths().set_score(&unauthorized, &user, &50);
 }
@@ -217,18 +215,18 @@ fn it_prevents_unauthorized_updates() {
 fn it_enforces_score_bounds() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
-    
+
     // Try to set score above maximum (should panic)
     client.set_score(&updater, &user, &101);
 }
@@ -239,11 +237,108 @@ fn it_enforces_score_bounds() {
 #[test]
 fn it_gets_version() {
     let env = Env::default();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let version = client.get_version();
     assert_eq!(version, symbol_short!("v1_0_0"));
 }
 
+/// Test: Allows zero amount increase
+/// Verifies that increase_score() with amount=0 succeeds without changing the score.
+/// This edge case ensures the contract handles idempotent operations correctly.
+/// Receives: Updater Address, User Address, amount=0. Returns: void. Score should remain unchanged.
+/// Note: Current implementation emits an event even when score doesn't change.
+#[test]
+fn it_allows_zero_increase_score() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Set initial score
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Increase by 0 - score should remain unchanged
+    client.increase_score(&updater, &user, &0);
+    assert_eq!(client.get_score(&user), 50);
+}
+
+/// Test: Allows zero amount decrease
+/// Verifies that decrease_score() with amount=0 succeeds without changing the score.
+/// This edge case ensures the contract handles idempotent operations correctly.
+/// Receives: Updater Address, User Address, amount=0. Returns: void. Score should remain unchanged.
+/// Note: Current implementation emits an event even when score doesn't change.
+#[test]
+fn it_allows_zero_decrease_score() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Set initial score
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Decrease by 0 - score should remain unchanged
+    client.decrease_score(&updater, &user, &0);
+    assert_eq!(client.get_score(&user), 50);
+}
+
+/// Test: Allows setting score to current value
+/// Verifies that set_score() can be called with the same value as the current score (idempotent operation).
+/// This is a common pattern where external callers might set a score without checking the current value first.
+/// Receives: Updater Address, User Address, new_score=current_score. Returns: void. Score should remain unchanged.
+/// Note: Current implementation emits an event even when score doesn't change.
+#[test]
+fn it_allows_setting_score_to_current_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Set initial score to 50
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Set score to same value (50) - should succeed without error
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Verify with different value
+    client.set_score(&updater, &user, &75);
+    assert_eq!(client.get_score(&user), 75);
+
+    // Set to same value again (75)
+    client.set_score(&updater, &user, &75);
+    assert_eq!(client.get_score(&user), 75);
+}
