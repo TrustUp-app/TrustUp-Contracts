@@ -24,6 +24,6 @@ pub struct AdminChanged {
 }
 
 // Constants for score bounds
+#[allow(dead_code)]
 pub const MIN_SCORE: u32 = 0;
 pub const MAX_SCORE: u32 = 100;
-

@@ -6,7 +6,7 @@ use crate::storage;
 /// Require that the given address is the admin, otherwise panic with NotAdmin error
 pub fn require_admin(env: &Env, caller: &Address) {
     let admin = storage::get_admin(env);
-    
+
     if caller != &admin {
         panic_with_error!(env, ReputationError::NotAdmin);
     }
@@ -18,4 +18,3 @@ pub fn require_updater(env: &Env, addr: &Address) {
         panic_with_error!(env, ReputationError::NotUpdater);
     }
 }
-

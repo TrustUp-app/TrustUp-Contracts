@@ -1,6 +1,8 @@
-#![cfg(test)]
-
-use soroban_sdk::{symbol_short, testutils::{Address as _, Events}, Address, Env, IntoVal, Symbol, Vec, Val};
+use soroban_sdk::{
+    symbol_short,
+    testutils::{Address as _, Events},
+    Address, Env, IntoVal, Symbol, Val, Vec,
+};
 
 use crate::ReputationContract;
 use crate::ReputationContractClient;
@@ -58,7 +60,7 @@ fn it_sets_updater() {
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
 
-    assert_eq!(client.is_updater(&updater), true);
+    assert!(client.is_updater(&updater));
 }
 
 /// Test: Checks updater permissions
@@ -80,8 +82,8 @@ fn it_checks_updater() {
 
     client.set_updater(&admin, &updater, &true);
 
-    assert_eq!(client.is_updater(&updater), true);
-    assert_eq!(client.is_updater(&non_updater), false);
+    assert!(client.is_updater(&updater));
+    assert!(!client.is_updater(&non_updater));
 }
 
 /// Test: Gets the reputation score
@@ -272,7 +274,7 @@ fn it_revokes_updater_access_after_removal() {
 
     // Revoke updater access
     client.set_updater(&admin, &updater, &false);
-    assert_eq!(client.is_updater(&updater), false);
+    assert!(!client.is_updater(&updater));
 
     // Former updater should no longer be able to increase the score (should panic NotUpdater)
     client.increase_score(&updater, &user, &5);
@@ -294,11 +296,11 @@ fn it_emits_event_on_updater_removal() {
     let updater = Address::generate(&env);
     // Grant updater
     client.set_updater(&admin, &updater, &true);
-    assert_eq!(client.is_updater(&updater), true);
+    assert!(client.is_updater(&updater));
 
     // Revoke updater (this should emit UPDCHGD event with false)
     client.set_updater(&admin, &updater, &false);
-    assert_eq!(client.is_updater(&updater), false);
+    assert!(!client.is_updater(&updater));
 
     // If we reached here without panic, event emission didn't crash
 }
@@ -319,7 +321,7 @@ fn it_handles_removing_non_existent_updater() {
 
     // Removing a never-added updater should not panic
     client.set_updater(&admin, &never_added, &false);
-    assert_eq!(client.is_updater(&never_added), false);
+    assert!(!client.is_updater(&never_added));
 }
 
 /// Overflow/Underflow tests
@@ -480,8 +482,8 @@ fn it_removing_one_updater_does_not_affect_others() {
 
     // Revoke updater1
     client.set_updater(&admin, &updater1, &false);
-    assert_eq!(client.is_updater(&updater1), false);
-    assert_eq!(client.is_updater(&updater2), true);
+    assert!(!client.is_updater(&updater1));
+    assert!(client.is_updater(&updater2));
 
     // updater2 should still be able to update
     client.increase_score(&updater2, &user, &5);
@@ -494,49 +496,49 @@ fn it_removing_one_updater_does_not_affect_others() {
 fn it_emits_score_changed_event_on_increase() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
     client.set_score(&updater, &user, &50);
-    
+
     // Increase score
     client.increase_score(&updater, &user, &20);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the SCORECHGD event (should be the last one)
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("SCORECHGD") {
             found_event = true;
-            
+
             // Verify user address (second topic)
             let event_user: Address = topics.get(1).unwrap().into_val(&env);
             assert_eq!(event_user, user);
-            
+
             // Verify data (old_score, new_score, reason) - data is a tuple
             let data_tuple: (u32, u32, Symbol) = event.2.into_val(&env);
             let (old_score, new_score, reason) = data_tuple;
-            
+
             assert_eq!(old_score, 50);
             assert_eq!(new_score, 70);
             assert_eq!(reason, symbol_short!("increase"));
             break;
         }
     }
-    
+
     assert!(found_event, "SCORECHGD event not found");
 }
 
@@ -546,43 +548,43 @@ fn it_emits_score_changed_event_on_increase() {
 fn it_emits_score_changed_event_on_decrease() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
     client.set_score(&updater, &user, &50);
-    
+
     // Decrease score
     client.decrease_score(&updater, &user, &20);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the SCORECHGD event
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("SCORECHGD") {
             // Check if this is the decrease event (new_score should be 30)
             let data_tuple: (u32, u32, Symbol) = event.2.into_val(&env);
             let (_, _new_score, reason) = data_tuple;
-            
+
             if reason == symbol_short!("decrease") {
                 found_event = true;
-                
+
                 // Verify user address (second topic)
                 let event_user: Address = topics.get(1).unwrap().into_val(&env);
                 assert_eq!(event_user, user);
-                
+
                 let (old_score, new_score, _) = data_tuple;
                 assert_eq!(old_score, 50);
                 assert_eq!(new_score, 30);
@@ -590,7 +592,7 @@ fn it_emits_score_changed_event_on_decrease() {
             }
         }
     }
-    
+
     assert!(found_event, "SCORECHGD event with 'decrease' reason not found");
 }
 
@@ -600,42 +602,42 @@ fn it_emits_score_changed_event_on_decrease() {
 fn it_emits_score_changed_event_on_set() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     let user = Address::generate(&env);
     client.set_score(&updater, &user, &50);
-    
+
     // Set score to new value
     client.set_score(&updater, &user, &75);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the SCORECHGD event with "set" reason
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("SCORECHGD") {
             let data_tuple: (u32, u32, Symbol) = event.2.into_val(&env);
             let (_, _, reason) = data_tuple;
-            
+
             if reason == symbol_short!("set") {
                 found_event = true;
-                
+
                 // Verify user address (second topic)
                 let event_user: Address = topics.get(1).unwrap().into_val(&env);
                 assert_eq!(event_user, user);
-                
+
                 let (old_score, new_score, _) = data_tuple;
                 assert_eq!(old_score, 50);
                 assert_eq!(new_score, 75);
@@ -643,7 +645,7 @@ fn it_emits_score_changed_event_on_set() {
             }
         }
     }
-    
+
     assert!(found_event, "SCORECHGD event with 'set' reason not found");
 }
 
@@ -653,33 +655,33 @@ fn it_emits_score_changed_event_on_set() {
 fn it_emits_updater_changed_event_on_grant() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
-    
+
     // Grant updater permission
     client.set_updater(&admin, &updater, &true);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the UPDCHGD event with allowed=true
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("UPDCHGD") {
             let allowed: bool = event.2.into_val(&env);
-            
+
             if allowed {
                 found_event = true;
-                
+
                 // Verify updater address (second topic)
                 let event_updater: Address = topics.get(1).unwrap().into_val(&env);
                 assert_eq!(event_updater, updater);
@@ -687,7 +689,7 @@ fn it_emits_updater_changed_event_on_grant() {
             }
         }
     }
-    
+
     assert!(found_event, "UPDCHGD event with allowed=true not found");
 }
 
@@ -697,34 +699,34 @@ fn it_emits_updater_changed_event_on_grant() {
 fn it_emits_updater_changed_event_on_revoke() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let updater = Address::generate(&env);
     client.set_updater(&admin, &updater, &true);
-    
+
     // Revoke updater permission
     client.set_updater(&admin, &updater, &false);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the UPDCHGD event with allowed=false
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("UPDCHGD") {
             let allowed: bool = event.2.into_val(&env);
-            
+
             if !allowed {
                 found_event = true;
-                
+
                 // Verify updater address (second topic)
                 let event_updater: Address = topics.get(1).unwrap().into_val(&env);
                 assert_eq!(event_updater, updater);
@@ -732,7 +734,7 @@ fn it_emits_updater_changed_event_on_revoke() {
             }
         }
     }
-    
+
     assert!(found_event, "UPDCHGD event with allowed=false not found");
 }
 
@@ -742,31 +744,31 @@ fn it_emits_updater_changed_event_on_revoke() {
 fn it_emits_admin_changed_event() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.set_admin(&admin);
-    
+
     let new_admin = Address::generate(&env);
-    
+
     // Change admin
     client.set_admin(&new_admin);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the ADMINCHGD event where old_admin != new_admin
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("ADMINCHGD") {
             let data_tuple: (Address, Address) = event.2.into_val(&env);
             let (old_admin, new_admin_event) = data_tuple;
-            
+
             // This should be the admin change event (not initial setup)
             if old_admin != new_admin_event {
                 found_event = true;
@@ -776,7 +778,7 @@ fn it_emits_admin_changed_event() {
             }
         }
     }
-    
+
     assert!(found_event, "ADMINCHGD event for admin change not found");
 }
 
@@ -787,37 +789,135 @@ fn it_emits_admin_changed_event() {
 fn it_emits_admin_changed_event_on_initial_setup() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(ReputationContract, ());
     let client = ReputationContractClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
-    
+
     // Set admin for the first time
     client.set_admin(&admin);
-    
+
     // Verify event was emitted
     let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
-    
+
     // Find the ADMINCHGD event
     let mut found_event = false;
     for event in events.iter() {
         let topics = event.1.clone();
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
-        
+
         if event_type == symbol_short!("ADMINCHGD") {
             found_event = true;
-            
+
             // Verify data (old_admin, new_admin) - data is a tuple
             let data_tuple: (Address, Address) = event.2.into_val(&env);
             let (old_admin, new_admin_event) = data_tuple;
-            
+
             // During initial setup, both old and new admin are set to the same address (the new admin)
             assert_eq!(old_admin, admin);
             assert_eq!(new_admin_event, admin);
             break;
         }
     }
-    
+
     assert!(found_event, "ADMINCHGD event not found");
+}
+
+/// Test: Allows zero amount increase
+/// Verifies that increase_score() with amount=0 succeeds without changing the score.
+/// This edge case ensures the contract handles idempotent operations correctly.
+/// Receives: Updater Address, User Address, amount=0. Returns: void. Score should remain unchanged.
+/// Note: Current implementation emits an event even when score doesn't change.
+#[test]
+fn it_allows_zero_increase_score() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Set initial score
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Increase by 0 - score should remain unchanged
+    client.increase_score(&updater, &user, &0);
+    assert_eq!(client.get_score(&user), 50);
+}
+
+/// Test: Allows zero amount decrease
+/// Verifies that decrease_score() with amount=0 succeeds without changing the score.
+/// This edge case ensures the contract handles idempotent operations correctly.
+/// Receives: Updater Address, User Address, amount=0. Returns: void. Score should remain unchanged.
+/// Note: Current implementation emits an event even when score doesn't change.
+#[test]
+fn it_allows_zero_decrease_score() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Set initial score
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Decrease by 0 - score should remain unchanged
+    client.decrease_score(&updater, &user, &0);
+    assert_eq!(client.get_score(&user), 50);
+}
+
+/// Test: Allows setting score to current value
+/// Verifies that set_score() can be called with the same value as the current score (idempotent operation).
+/// This is a common pattern where external callers might set a score without checking the current value first.
+/// Receives: Updater Address, User Address, new_score=current_score. Returns: void. Score should remain unchanged.
+/// Note: Current implementation emits an event even when score doesn't change.
+#[test]
+fn it_allows_setting_score_to_current_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+
+    let user = Address::generate(&env);
+
+    // Set initial score to 50
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Set score to same value (50) - should succeed without error
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+
+    // Verify with different value
+    client.set_score(&updater, &user, &75);
+    assert_eq!(client.get_score(&user), 75);
+
+    // Set to same value again (75)
+    client.set_score(&updater, &user, &75);
+    assert_eq!(client.get_score(&user), 75);
 }

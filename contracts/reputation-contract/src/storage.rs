@@ -25,7 +25,7 @@ pub fn read_score(env: &Env, user: &Address) -> u32 {
         .instance()
         .get(&SCORES_MAP)
         .unwrap_or_else(|| Map::new(env));
-    
+
     scores.get(user.clone()).unwrap_or(0)
 }
 
@@ -36,7 +36,7 @@ pub fn write_score(env: &Env, user: &Address, score: u32) {
         .instance()
         .get(&SCORES_MAP)
         .unwrap_or_else(|| Map::new(env));
-    
+
     scores.set(user.clone(), score);
     env.storage().instance().set(&SCORES_MAP, &scores);
 }
@@ -48,7 +48,7 @@ pub fn is_updater(env: &Env, addr: &Address) -> bool {
         .instance()
         .get(&UPDATERS_MAP)
         .unwrap_or_else(|| Map::new(env));
-    
+
     updaters.get(addr.clone()).unwrap_or(false)
 }
 
@@ -59,13 +59,12 @@ pub fn set_updater(env: &Env, updater: &Address, allowed: bool) {
         .instance()
         .get(&UPDATERS_MAP)
         .unwrap_or_else(|| Map::new(env));
-    
+
     if allowed {
         updaters.set(updater.clone(), true);
     } else {
         updaters.remove(updater.clone());
     }
-    
+
     env.storage().instance().set(&UPDATERS_MAP, &updaters);
 }
-
