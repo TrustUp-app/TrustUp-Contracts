@@ -486,5 +486,182 @@ fn it_removing_one_updater_does_not_affect_others() {
     // updater2 should still be able to update
     client.increase_score(&updater2, &user, &5);
     assert_eq!(client.get_score(&user), 20);
+/// Test: Maintains independent scores for multiple users
+/// Verifies that multiple users' scores remain independent and don't interfere with each other.
+/// Receives: Multiple user addresses with different scores. Returns: void. Validates score isolation.
+#[test]
+fn it_maintains_independent_scores_for_multiple_users() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+    
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+    
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+    
+    // Create 3 users with different initial scores
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    
+    // Set initial scores: 25, 50, 75
+    client.set_score(&updater, &user1, &25);
+    client.set_score(&updater, &user2, &50);
+    client.set_score(&updater, &user3, &75);
+    
+    // Verify initial scores
+    assert_eq!(client.get_score(&user1), 25);
+    assert_eq!(client.get_score(&user2), 50);
+    assert_eq!(client.get_score(&user3), 75);
+    
+    // Modify user1's score
+    client.increase_score(&updater, &user1, &10);
+    
+    // Verify user1's score changed
+    assert_eq!(client.get_score(&user1), 35);
+    
+    // Verify other users' scores remain unchanged
+    assert_eq!(client.get_score(&user2), 50);
+    assert_eq!(client.get_score(&user3), 75);
+    
+    // Modify user2's score
+    client.decrease_score(&updater, &user2, &15);
+    
+    // Verify user2's score changed
+    assert_eq!(client.get_score(&user2), 35);
+    
+    // Verify other users' scores remain unchanged
+    assert_eq!(client.get_score(&user1), 35);
+    assert_eq!(client.get_score(&user3), 75);
+}
+
+/// Test: Handles many updaters
+/// Verifies that multiple updaters can operate independently and revoking one doesn't affect others.
+/// Receives: Multiple updater addresses. Returns: void. Validates updater independence.
+#[test]
+fn it_handles_many_updaters() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+    
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+    
+    // Register 5 updaters
+    let updater1 = Address::generate(&env);
+    let updater2 = Address::generate(&env);
+    let updater3 = Address::generate(&env);
+    let updater4 = Address::generate(&env);
+    let updater5 = Address::generate(&env);
+    
+    client.set_updater(&admin, &updater1, &true);
+    client.set_updater(&admin, &updater2, &true);
+    client.set_updater(&admin, &updater3, &true);
+    client.set_updater(&admin, &updater4, &true);
+    client.set_updater(&admin, &updater5, &true);
+    
+    // Verify all updaters are registered
+    assert_eq!(client.is_updater(&updater1), true);
+    assert_eq!(client.is_updater(&updater2), true);
+    assert_eq!(client.is_updater(&updater3), true);
+    assert_eq!(client.is_updater(&updater4), true);
+    assert_eq!(client.is_updater(&updater5), true);
+    
+    // Create 5 different users
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    let user4 = Address::generate(&env);
+    let user5 = Address::generate(&env);
+    
+    // Each updater modifies a different user's score
+    client.set_score(&updater1, &user1, &10);
+    client.set_score(&updater2, &user2, &20);
+    client.set_score(&updater3, &user3, &30);
+    client.set_score(&updater4, &user4, &40);
+    client.set_score(&updater5, &user5, &50);
+    
+    // Verify all operations worked correctly
+    assert_eq!(client.get_score(&user1), 10);
+    assert_eq!(client.get_score(&user2), 20);
+    assert_eq!(client.get_score(&user3), 30);
+    assert_eq!(client.get_score(&user4), 40);
+    assert_eq!(client.get_score(&user5), 50);
+    
+    // Revoke updater3's permissions
+    client.set_updater(&admin, &updater3, &false);
+    
+    // Verify updater3 is no longer an updater
+    assert_eq!(client.is_updater(&updater3), false);
+    
+    // Verify other updaters are still active
+    assert_eq!(client.is_updater(&updater1), true);
+    assert_eq!(client.is_updater(&updater2), true);
+    assert_eq!(client.is_updater(&updater4), true);
+    assert_eq!(client.is_updater(&updater5), true);
+    
+    // Verify other updaters can still operate
+    client.increase_score(&updater1, &user1, &5);
+    client.increase_score(&updater2, &user2, &5);
+    client.increase_score(&updater4, &user4, &5);
+    client.increase_score(&updater5, &user5, &5);
+    
+    assert_eq!(client.get_score(&user1), 15);
+    assert_eq!(client.get_score(&user2), 25);
+    assert_eq!(client.get_score(&user4), 45);
+    assert_eq!(client.get_score(&user5), 55);
+    
+    // Verify user3's score remains unchanged (updater3 was revoked)
+    assert_eq!(client.get_score(&user3), 30);
+}
+
+/// Test: Handles rapid score changes
+/// Verifies that multiple sequential operations on the same user produce correct results.
+/// Receives: Multiple score operations on same user. Returns: void. Validates sequential operation correctness.
+#[test]
+fn it_handles_rapid_score_changes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let contract_id = env.register(ReputationContract, ());
+    let client = ReputationContractClient::new(&env, &contract_id);
+    
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+    
+    let updater = Address::generate(&env);
+    client.set_updater(&admin, &updater, &true);
+    
+    let user = Address::generate(&env);
+    
+    // Perform multiple score changes in sequence
+    // Operation 1: Set score to 30
+    client.set_score(&updater, &user, &30);
+    assert_eq!(client.get_score(&user), 30);
+    
+    // Operation 2: Increase by 20
+    client.increase_score(&updater, &user, &20);
+    assert_eq!(client.get_score(&user), 50);
+    
+    // Operation 3: Decrease by 10
+    client.decrease_score(&updater, &user, &10);
+    assert_eq!(client.get_score(&user), 40);
+    
+    // Operation 4: Increase by 15
+    client.increase_score(&updater, &user, &15);
+    assert_eq!(client.get_score(&user), 55);
+    
+    // Operation 5: Set to 50
+    client.set_score(&updater, &user, &50);
+    assert_eq!(client.get_score(&user), 50);
+    
+    // Verify final score is correct
+    assert_eq!(client.get_score(&user), 50);
 }
 
