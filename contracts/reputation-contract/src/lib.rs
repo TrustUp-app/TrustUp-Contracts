@@ -41,7 +41,7 @@ impl ReputationContract {
             .unwrap();
 
         if new_score > types::MAX_SCORE {
-            soroban_sdk::panic_with_error!(&env, ReputationError::OutOfBounds);
+            soroban_sdk::panic_with_error!(&env, ReputationError::Overflow);
         }
 
         storage::write_score(&env, &user, new_score);
@@ -57,10 +57,10 @@ impl ReputationContract {
         access::require_updater(&env, &updater);
 
         let old_score = storage::read_score(&env, &user);
-        let new_score = old_score
-            .checked_sub(amount)
-            .ok_or(ReputationError::Underflow)
-            .unwrap();
+        let new_score = match old_score.checked_sub(amount) {
+            Some(score) => score,
+            None => soroban_sdk::panic_with_error!(&env, ReputationError::Underflow),
+        };
 
         storage::write_score(&env, &user, new_score);
 
