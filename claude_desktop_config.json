@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "stellar": {
+      "command": "npx",
+      "args": ["@mseep/stellar-mcp"],
+      "env": {}
+    }
+  }
+}

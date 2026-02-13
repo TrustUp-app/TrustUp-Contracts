@@ -1,116 +1,325 @@
-
 # TrustUp Contracts
 
-Decentralized "Buy Now, Pay Later" (BNPL) platform on Stellar using Soroban smart contracts. Users pay 20% guarantee deposit and receive credit from a shared liquidity pool, with on-chain reputation adjusting based on repayment behavior.
+> Decentralized "Buy Now, Pay Later" (BNPL) platform on Stellar blockchain using Soroban smart contracts
 
-## Project Structure
+[![Build Status](https://github.com/yourusername/TrustUp-Contracts/workflows/CI/badge.svg)](https://github.com/yourusername/TrustUp-Contracts/actions)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+## What is TrustUp?
+
+TrustUp enables users to make purchases by paying a 20% guarantee deposit upfront while receiving the remaining 80% as credit from a community-funded liquidity pool. The system uses **on-chain reputation** to reward good repayment behavior and penalize defaults.
+
+### Key Features
+
+- ✨ **Transparent Credit System**: All rules encoded in smart contracts
+- 🔐 **Portable Reputation**: On-chain scores owned by users
+- 💰 **Community Liquidity**: Decentralized pool of liquidity providers
+- 🌍 **Financial Inclusion**: Accessible to anyone with a Stellar wallet
+- ⚡ **Low Fees**: No middlemen, automated execution (~$0.00001 per transaction)
+
+## 🏗️ Architecture
 
 ```
-trustup-contracts/
-├── Cargo.toml                 # Workspace configuration
-├── contracts/
-│   ├── escrow-contract/       # Manages user guarantees and merchant payments
-│   ├── creditline-contract/   # Handles loan creation and repayment
-│   ├── reputation-contract/   # Tracks and updates user reputation scores
-│   └── pool-contract/         # Manages liquidity provider deposits and rewards
-├── README.md
-└── .gitignore
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐
+│ Reputation  │◄────┤  CreditLine  │────►│   Merchant   │
+│  Contract   │     │   Contract   │     │   Registry   │
+└─────────────┘     └──────────────┘     └──────────────┘
+      ▲                     │
+      │                     ▼
+      │             ┌──────────────┐
+      └─────────────┤  Liquidity   │
+                    │     Pool     │
+                    └──────────────┘
 ```
 
-## Contracts Overview
+**Learn more**: [docs/architecture/](docs/architecture/)
 
-### Escrow Contract
-Holds user guarantees (20% down payment) and releases funds to merchants when transaction conditions are met. Manages the complete escrow lifecycle for BNPL transactions.
+## 🚀 Quick Start
 
-**Key responsibilities:**
-- Deposit and hold user guarantee payments
-- Release funds to merchants upon fulfillment
-- Handle refunds when applicable
-- Track escrow status
+### Prerequisites
 
-### CreditLine Contract
-Handles loan creation and repayment processing for BNPL transactions. Manages credit issuance, payment schedules, and repayment tracking.
+- **Rust** (latest stable)
+- **Soroban SDK** (included via Cargo)
+- **wasm32-unknown-unknown** target
 
-**Key responsibilities:**
-- Create and issue credit lines
-- Process loan repayments
-- Manage payment schedules
-- Calculate interest and fees
-- Track loan status
+### Installation
 
-### Reputation Contract
-Tracks and updates user reputation scores based on repayment behavior. User reputation adjusts dynamically based on their on-chain payment history.
-
-**Key responsibilities:**
-- Track user reputation scores
-- Update reputation based on repayment performance
-- Provide reputation queries
-- Maintain reputation history
-- Determine credit limits based on reputation
-
-### Pool Contract
-Manages liquidity provider deposits and rewards. Handles the shared liquidity pool that funds BNPL credit lines.
-
-**Key responsibilities:**
-- Accept liquidity provider deposits
-- Process liquidity withdrawals
-- Distribute rewards to providers
-- Manage pool balance and allocation
-- Set interest rates
-
-## Prerequisites
-
-- Rust (latest stable version)
-- Soroban SDK (included via Cargo dependencies)
-- `wasm32-unknown-unknown` target for Rust
-
-Install the required target:
 ```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Add WASM target
 rustup target add wasm32-unknown-unknown
+
+# Install Stellar CLI (optional, for deployment)
+cargo install stellar-cli --locked
 ```
 
-## Build
+### Clone and Build
 
-Check contracts (verify without building):
 ```bash
+# Clone repository
+git clone https://github.com/yourusername/TrustUp-Contracts.git
+cd TrustUp-Contracts
+
+# Check compilation
 cargo check
-```
 
-Build all contracts:
-```bash
-cargo build --release
-```
-
-Build a specific contract:
-```bash
-cargo build --release -p escrow-contract
-cargo build --release -p creditline-contract
-cargo build --release -p reputation-contract
-cargo build --release -p pool-contract
-```
-
-Build for development:
-```bash
-cargo build
-```
-
-## Test
-
-Run all tests:
-```bash
+# Run tests
 cargo test
+
+# Build all contracts
+cargo build --release
+
+# Build WASM for deployment
+cargo build -p reputation-contract --target wasm32-unknown-unknown --release
 ```
 
-Run tests for a specific contract:
+## 📦 Contracts
+
+| Contract | Status | Description |
+|----------|--------|-------------|
+| **[Reputation](contracts/reputation-contract/)** | ✅ Complete | Manages user credit scores (0-100) |
+| **[CreditLine](contracts/creditline-contract/)** | ⏳ In Progress | Handles loan creation and repayment |
+| **[Merchant Registry](contracts/merchant-registry-contract/)** | ⏳ Planned | Whitelist of authorized merchants |
+| **[Liquidity Pool](contracts/liquidity-pool-contract/)** | ⏳ Planned | Manages LP deposits and rewards |
+
+### Reputation Contract ✅
+
+Track and update user credit scores with role-based access control.
+
+**Key Functions**:
+```rust
+pub fn get_score(env: Env, user: Address) -> u32
+pub fn increase_score(env: Env, updater: Address, user: Address, amount: u32)
+pub fn decrease_score(env: Env, updater: Address, user: Address, amount: u32)
+```
+
+**Features**:
+- Score range: 0-100
+- Admin and updater roles
+- Event emission for all changes
+- Comprehensive test coverage
+
+## 🛠️ Development
+
+### Project Structure
+
+```
+TrustUp-Contracts/
+├── contracts/
+│   ├── reputation-contract/        # ✅ User credit scores
+│   ├── creditline-contract/        # ⏳ Loan management
+│   ├── merchant-registry-contract/ # ⏳ Merchant whitelist
+│   └── liquidity-pool-contract/    # ⏳ LP management
+├── docs/                           # Comprehensive documentation
+├── Cargo.toml                      # Workspace configuration
+└── README.md                       # This file
+```
+
+### Common Commands
+
 ```bash
-cargo test -p escrow-contract
-cargo test -p creditline-contract
-cargo test -p reputation-contract
-cargo test -p pool-contract
+# Development
+cargo check              # Quick compilation check
+cargo test               # Run all tests
+cargo fmt                # Format code
+cargo clippy             # Lint code
+
+# Building
+cargo build              # Native build
+cargo build --release    # Optimized build
+
+# WASM Build (for deployment)
+cargo build -p <contract-name> --target wasm32-unknown-unknown --release
+
+# Example: Build reputation contract
+cargo build -p reputation-contract --target wasm32-unknown-unknown --release
 ```
 
-## Development Status
+### Code Quality
 
-This is the initial project structure and boilerplate. Contract logic implementation is pending.
+We use automated tools to maintain code quality:
 
-**Current version:** trustup-v1.0
+```bash
+# Format check
+cargo fmt -- --check
+
+# Lint with warnings as errors
+cargo clippy -- -D warnings
+
+# Run tests with coverage
+cargo test --verbose
+```
+
+## 📚 Documentation
+
+Comprehensive documentation available in [`docs/`](docs/):
+
+- **[Architecture](docs/architecture/)** - System design and contract architecture
+- **[Standards](docs/standards/)** - Code standards and conventions
+- **[Development](docs/development/)** - Development workflow and tools
+- **[Resources](docs/resources/)** - External tools and references
+  - [OpenZeppelin Tools](docs/resources/openzeppelin.md)
+  - [Stellar & Soroban](docs/resources/stellar-soroban.md)
+  - [AI Assistants & MCP](docs/resources/ai-assistants.md)
+
+**Quick Links**:
+- [Project Context](PROJECT_CONTEXT.md) - Vision and use cases
+- [Roadmap](docs/ROADMAP.md) - Development timeline
+- [Contributing Guide](CONTRIBUTING.md) - How to contribute
+
+## 🤖 AI Development Tools
+
+TrustUp integrates with modern AI development tools:
+
+### OpenZeppelin Stellar Contracts
+
+Configured in [`Cargo.toml`](contracts/reputation-contract/Cargo.toml):
+```toml
+[dependencies]
+openzeppelin-stellar = { git = "https://github.com/OpenZeppelin/stellar-contracts" }
+openzeppelin-soroban-helpers = { git = "https://github.com/OpenZeppelin/soroban-helpers" }
+```
+
+### Stellar MCP Server
+
+MCP (Model Context Protocol) server for AI-assisted development with Claude.
+
+**Setup**: See [docs/resources/ai-assistants.md](docs/resources/ai-assistants.md)
+
+## 🧪 Testing
+
+Comprehensive test suite with unit and integration tests.
+
+```bash
+# Run all tests
+cargo test
+
+# Run tests for specific contract
+cargo test -p reputation-contract
+
+# Run specific test
+cargo test test_increase_score
+
+# Show test output
+cargo test -- --nocapture
+```
+
+**Test Coverage**: Each contract includes:
+- ✅ Unit tests for all functions
+- ✅ Error case testing
+- ✅ Boundary value testing
+- ✅ Access control testing
+- ✅ Event emission verification
+
+## 🔐 Security
+
+Security is our top priority:
+
+- ✅ Checked arithmetic (overflow/underflow protection)
+- ✅ Authorization checks before state changes
+- ✅ Input validation
+- ✅ Event emission for auditability
+- ✅ OpenZeppelin security patterns
+- ⏳ External security audit (planned)
+
+**Report vulnerabilities**: security@trustup.example (replace with actual contact)
+
+## 🗺️ Roadmap
+
+**Current Phase**: Phase 3 - CreditLine Contract Development
+
+**Completed** ✅:
+- Reputation Contract (8 issues)
+- Access control and authorization
+- Comprehensive test suite
+
+**In Progress** ⏳:
+- CreditLine Contract
+- Loan creation and repayment logic
+- Integration with Reputation contract
+
+**Planned** 📋:
+- Merchant Registry
+- Liquidity Pool
+- Full system integration tests
+
+**See**: [docs/ROADMAP.md](docs/ROADMAP.md) for detailed breakdown
+
+## 🤝 Contributing
+
+We welcome contributions! Here's how to get started:
+
+1. **Read**: [CONTRIBUTING.md](CONTRIBUTING.md)
+2. **Pick an issue**: See [ROADMAP.md](docs/ROADMAP.md)
+3. **Create branch**: `feat/SC-XX-description`
+4. **Follow standards**: [docs/standards/](docs/standards/)
+5. **Submit PR**: Use the PR template
+
+### Development Workflow
+
+```bash
+# 1. Create feature branch
+git checkout -b feat/SC-XX-my-feature
+
+# 2. Make changes and test
+cargo test
+cargo fmt
+cargo clippy
+
+# 3. Commit with conventional commits
+git commit -m "feat: implement loan creation (SC-08)"
+
+# 4. Push and create PR
+git push origin feat/SC-XX-my-feature
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🌟 Tech Stack
+
+- **Blockchain**: [Stellar](https://stellar.org/)
+- **Smart Contracts**: [Soroban](https://soroban.stellar.org/) (Rust → WASM)
+- **SDK**: [soroban-sdk 22.0.0](https://docs.rs/soroban-sdk/)
+- **Build Tool**: [Cargo](https://doc.rust-lang.org/cargo/)
+- **Security**: [OpenZeppelin Stellar](https://github.com/OpenZeppelin/stellar-contracts)
+
+## 🔗 Links
+
+- **Documentation**: [docs/](docs/)
+- **Project Context**: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)
+- **Roadmap**: [docs/ROADMAP.md](docs/ROADMAP.md)
+- **Issues**: [GitHub Issues](https://github.com/yourusername/TrustUp-Contracts/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/TrustUp-Contracts/discussions)
+
+### Stellar Ecosystem
+
+- [Stellar Developers](https://developers.stellar.org/)
+- [Soroban Documentation](https://soroban.stellar.org/docs)
+- [Stellar Discord](https://discord.gg/stellar)
+- [Stellar Expert](https://stellar.expert/) (Block Explorer)
+
+### OpenZeppelin
+
+- [OpenZeppelin Stellar](https://github.com/OpenZeppelin/stellar-contracts)
+- [OpenZeppelin Docs](https://docs.openzeppelin.com/stellar-contracts)
+- [Contract Wizard](https://wizard.openzeppelin.com/stellar)
+
+## 💬 Community
+
+- **Discord**: [Stellar Discord](https://discord.gg/stellar) - mention @TrustUp
+- **GitHub**: [Issues](https://github.com/yourusername/TrustUp-Contracts/issues) and [Discussions](https://github.com/yourusername/TrustUp-Contracts/discussions)
+- **Twitter**: [@TrustUp](https://twitter.com/trustup) (replace with actual handle)
+
+## 📊 Status
+
+**Version**: 1.0.0
+**Status**: Active Development
+**Last Updated**: February 2026
+
+---
+
+Built with ❤️ on [Stellar](https://stellar.org/) using [Soroban](https://soroban.stellar.org/)

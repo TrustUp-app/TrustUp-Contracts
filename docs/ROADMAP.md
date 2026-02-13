@@ -1,1133 +1,617 @@
-# Development Roadmap
+# TrustUp Smart Contracts - Development Roadmap
 
-## Project Status
+This document provides a comprehensive view of the development status for all smart contract issues across the TrustUp platform.
 
-**Current Phase**: Phase 2 - Reputation On-Chain ✅ (Completed)
-**Next Phase**: Phase 3 - CreditLine Core
-**Overall Progress**: 8/20 issues completed (40%)
-
-## Phase Overview
-
-| Phase | Name | Status | Completed | Total | Progress |
-|-------|------|--------|-----------|-------|----------|
-| 1 | Access Control & Governance | ✅ Complete | 3/3 | 3 | 100% |
-| 2 | Reputation On-Chain | ✅ Complete | 4/4 | 4 | 100% |
-| 3 | CreditLine Core | ⏳ Pending | 0/3 | 3 | 0% |
-| 4 | CreditLine ↔ Reputation | ⏳ Pending | 0/2 | 2 | 0% |
-| 5 | Merchant Registry | ⏳ Pending | 0/2 | 2 | 0% |
-| 6 | Liquidity Pool | ⏳ Pending | 0/3 | 3 | 0% |
-| 7 | Contract Tests | 🚧 In Progress | 1/3 | 3 | 33% |
-
-**Legend**:
-- ✅ Completed
-- 🚧 In Progress
-- ⏳ Pending (not started)
+**Legend:**
+- ✅ **Completed** — Fully implemented and tested
+- ⚠️ **Incomplete** — Partially implemented or missing key functionality
+- ⏳ **Pending** — Not yet started
+- 🚧 **In Progress** — Currently being worked on
 
 ---
 
-## Phase 1: Access Control & Governance
+## Phase 1 — Access Control & Governance ✅
 
-**Goal**: Establish foundation for secure contract administration and role-based access control.
+**Status:** COMPLETED
+**Contract:** [reputation-contract](../contracts/reputation-contract/)
 
-**Dependencies**: None (foundational phase)
+Establishes admin management and updater authorization to secure all contract mutations.
 
-**Status**: ✅ **COMPLETED**
+### SC-01: Implement admin management ✅
 
-### Issues
+**Status:** Completed
+**Files:**
+- [access.rs](../contracts/reputation-contract/src/access.rs)
+- [lib.rs:105-125](../contracts/reputation-contract/src/lib.rs#L105-L125)
 
-#### ✅ SC-01: Implement Admin Management
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/lib.rs:77-92](../contracts/reputation-contract/src/lib.rs), [contracts/reputation-contract/src/access.rs:4-18](../contracts/reputation-contract/src/access.rs)
+**Implementation:**
+- ✅ Admin initialization (`set_admin`)
+- ✅ Admin transfer with authorization check
+- ✅ `get_admin()` public accessor
+- ✅ Event emission on admin change (`ADMINCHGD`)
+- ✅ Strict authorization validation
 
-**Description**:
-Define initial admin, enable admin transfer, and implement strict validation to prevent unauthorized modifications.
-
-**Requirements**:
-- [x] Initialize admin on first setup (no auth required for first call)
-- [x] Implement `set_admin(new_admin: Address)` function
-- [x] Implement `get_admin() -> Address` function
-- [x] Require admin authorization for admin transfer
-- [x] Emit `ADMINCHGD` event when admin changes
-
-**Implementation Details**:
-```rust
-// Function signature
-pub fn set_admin(env: Env, new_admin: Address) -> Result<(), ReputationError>
-
-// Access control
-- First call: No authorization required (admin initialization)
-- Subsequent calls: Requires current admin authorization
-```
-
-**Events Emitted**:
-```rust
-env.events().publish(
-    (symbol_short!("ADMINCHGD"),),
-    (old_admin, new_admin)
-);
-```
-
-**Related Files**:
-- `contracts/reputation-contract/src/lib.rs` - Main admin functions
-- `contracts/reputation-contract/src/access.rs` - Admin authorization checks
-- `contracts/reputation-contract/src/storage.rs` - Admin storage operations
-- `contracts/reputation-contract/src/events.rs` - Admin change events
+**Tests:** 26+ tests including:
+- Admin succession and transfer
+- Permission revocation for old admin
+- Admin preservation during state changes
 
 ---
 
-#### ✅ SC-02: Implement Updater Authorization
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/lib.rs:104-121](../contracts/reputation-contract/src/lib.rs), [contracts/reputation-contract/src/access.rs:20-32](../contracts/reputation-contract/src/access.rs)
+### SC-02: Implement updater authorization ✅
 
-**Description**:
-Register and revoke authorized updaters. Restrict sensitive score modification functions to these roles.
+**Status:** Completed
+**Files:**
+- [access.rs](../contracts/reputation-contract/src/access.rs)
+- [lib.rs:90-101](../contracts/reputation-contract/src/lib.rs#L90-L101)
 
-**Requirements**:
-- [x] Implement `set_updater(admin: Address, updater: Address, allowed: bool)` function
-- [x] Implement `is_updater(addr: Address) -> bool` function
-- [x] Only admin can register/revoke updaters
-- [x] Store updater status in contract storage
-- [x] Emit `UPDCHGD` event when updater status changes
+**Implementation:**
+- ✅ Register updaters (`set_updater`)
+- ✅ Revoke updaters
+- ✅ Query updater status (`is_updater`)
+- ✅ Admin-only mutation with `require_admin`
+- ✅ Updater-only function restrictions (`require_updater`)
 
-**Implementation Details**:
-```rust
-// Function signature
-pub fn set_updater(env: Env, admin: Address, updater: Address, allowed: bool)
-
-// Access control
-- Requires admin authorization (admin.require_auth())
-- Validates caller is stored admin
-```
-
-**Events Emitted**:
-```rust
-env.events().publish(
-    (symbol_short!("UPDCHGD"), updater),
-    allowed
-);
-```
-
-**Usage Example**:
-```rust
-// Admin grants updater permission to CreditLine contract
-reputation_contract.set_updater(&admin, &creditline_address, &true);
-
-// Later, admin revokes permission
-reputation_contract.set_updater(&admin, &creditline_address, &false);
-```
-
-**Related Files**:
-- `contracts/reputation-contract/src/lib.rs` - Updater management functions
-- `contracts/reputation-contract/src/access.rs` - Updater authorization checks
-- `contracts/reputation-contract/src/storage.rs` - Updater storage operations
-- `contracts/reputation-contract/src/events.rs` - Updater change events
+**Tests:**
+- Multiple updater management
+- Updater permission revocation
+- Unauthorized access prevention
 
 ---
 
-#### ✅ SC-03: Emit Access Control Events
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/events.rs](../contracts/reputation-contract/src/events.rs)
+### SC-03: Emit access control events ✅
 
-**Description**:
-Emit blockchain events when admin or updaters change to enable observability and off-chain indexing.
+**Status:** Completed
+**Files:**
+- [events.rs](../contracts/reputation-contract/src/events.rs)
 
-**Requirements**:
-- [x] Define event topics and data structures
-- [x] Emit `ADMINCHGD` event on admin transfer
-- [x] Emit `UPDCHGD` event on updater status change
-- [x] Include relevant addresses in event topics for indexing
-- [x] Include old/new values in event data
+**Implementation:**
+- ✅ `ADMINCHGD` — Admin transfer event
+- ✅ `UPDCHGD` — Updater status change event
+- ✅ Events emitted on all access control mutations
 
-**Implemented Events**:
-
-1. **Admin Changed Event**:
-```rust
-Topic: (symbol_short!("ADMINCHGD"),)
-Data: (old_admin: Address, new_admin: Address)
-```
-
-2. **Updater Changed Event**:
-```rust
-Topic: (symbol_short!("UPDCHGD"), updater: Address)
-Data: allowed: bool
-```
-
-**Related Files**:
-- `contracts/reputation-contract/src/events.rs` - Event emission helpers
-- `contracts/reputation-contract/src/lib.rs` - Event calls in admin/updater functions
+**Tests:**
+- Event emission verification for all scenarios
+- Event data validation (topics and payloads)
 
 ---
 
-## Phase 2: Reputation On-Chain
+## Phase 2 — On-Chain Reputation ✅
 
-**Goal**: Implement on-chain reputation scoring system with secure storage and update mechanisms.
+**Status:** COMPLETED
+**Contract:** [reputation-contract](../contracts/reputation-contract/)
 
-**Dependencies**: Phase 1 (requires admin and updater roles)
+Implements on-chain storage and management of user reputation scores.
 
-**Status**: ✅ **COMPLETED**
+### SC-04: Implement reputation storage ✅
 
-### Issues
+**Status:** Completed
+**Files:**
+- [storage.rs](../contracts/reputation-contract/src/storage.rs)
+- [types.rs](../contracts/reputation-contract/src/types.rs)
 
-#### ✅ SC-04: Implement Reputation Storage
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/storage.rs](../contracts/reputation-contract/src/storage.rs)
+**Implementation:**
+- ✅ On-chain score storage (u32: 0-100)
+- ✅ Optimized read/write operations
+- ✅ Storage key constants (`SCORES_KEY`)
+- ✅ Safe arithmetic with overflow/underflow checks
 
-**Description**:
-Define on-chain data structure for reputation scores with minimal metadata. Optimize for efficient read/write operations.
-
-**Requirements**:
-- [x] Define storage key structure for user scores
-- [x] Implement `get_score(user: Address) -> u32` storage function
-- [x] Implement `set_score(user: Address, score: u32)` storage function
-- [x] Use Map-based storage for user scores
-- [x] Return default score (0) for users without score history
-
-**Implementation Details**:
-```rust
-// Storage key enum
-pub enum ReputationDataKey {
-    Admin,
-    Updater(Address),
-    Score(Address),
-}
-
-// Storage operations use Soroban Map
-env.storage().instance().get(&key).unwrap_or(DEFAULT_SCORE)
-env.storage().instance().set(&key, &score)
-```
-
-**Storage Schema**:
-| Key | Value Type | Description |
-|-----|-----------|-------------|
-| `Admin` | `Address` | Current admin address |
-| `Updater(Address)` | `bool` | Whether address is authorized updater |
-| `Score(Address)` | `u32` | User's reputation score (0-100) |
-
-**Related Files**:
-- `contracts/reputation-contract/src/storage.rs` - Storage implementation
-- `contracts/reputation-contract/src/types.rs` - DEFAULT_SCORE constant (0)
+**Tests:**
+- Score persistence across operations
+- Storage integrity during admin changes
 
 ---
 
-#### ✅ SC-05: Implement Get Reputation Function
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/lib.rs:29-37](../contracts/reputation-contract/src/lib.rs)
+### SC-05: Implement get reputation function ✅
 
-**Description**:
-Expose public read function for querying user reputation scores. Ensure secure and efficient access.
+**Status:** Completed
+**Files:**
+- [lib.rs:27-29](../contracts/reputation-contract/src/lib.rs#L27-L29)
 
-**Requirements**:
-- [x] Implement `get_score(user: Address) -> u32` public function
-- [x] No authorization required (public read)
-- [x] Return stored score or default (0) if not found
-- [x] Optimize for gas efficiency
+**Implementation:**
+- ✅ Public read-only accessor
+- ✅ Returns 0 for users without scores (default)
+- ✅ Efficient single storage read
 
-**Implementation Details**:
-```rust
-pub fn get_score(env: Env, user: Address) -> u32 {
-    storage::get_score(&env, &user)
-}
-```
-
-**Usage Example**:
-```rust
-// Query user's reputation score
-let score = reputation_contract.get_score(&user_address);
-
-// Use score to determine credit terms
-if score >= 75 {
-    // Offer premium credit terms
-} else if score >= 50 {
-    // Offer standard credit terms
-} else {
-    // Deny credit or offer limited terms
-}
-```
-
-**Related Files**:
-- `contracts/reputation-contract/src/lib.rs` - Public interface
-- `contracts/reputation-contract/src/storage.rs` - Storage read operation
+**Tests:**
+- Default score behavior
+- Score retrieval accuracy
 
 ---
 
-#### ✅ SC-06: Implement Increase Reputation
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/lib.rs:39-58](../contracts/reputation-contract/src/lib.rs)
+### SC-06: Implement increase reputation ✅
 
-**Description**:
-Allow authorized updaters to increase user scores with validation. Prevent overflow and out-of-bounds errors.
+**Status:** Completed
+**Files:**
+- [lib.rs:32-51](../contracts/reputation-contract/src/lib.rs#L32-L51)
 
-**Requirements**:
-- [x] Implement `increase_score(updater: Address, user: Address, amount: u32)` function
-- [x] Require updater authorization
-- [x] Use checked arithmetic to prevent overflow
-- [x] Validate result is within bounds (0-100)
-- [x] Emit `SCORECHGD` event with reason
+**Implementation:**
+- ✅ Updater-only authorization
+- ✅ Overflow protection (max 100)
+- ✅ Event emission with reason
+- ✅ Zero-amount increases allowed
 
-**Implementation Details**:
-```rust
-pub fn increase_score(env: Env, updater: Address, user: Address, amount: u32) {
-    access::require_updater(&env, &updater);
-
-    let old_score = storage::get_score(&env, &user);
-    let new_score = old_score
-        .checked_add(amount)
-        .ok_or_else(|| ReputationError::Overflow)
-        .unwrap();
-
-    if new_score > types::MAX_SCORE {
-        panic_with_error!(&env, ReputationError::OutOfBounds);
-    }
-
-    storage::set_score(&env, &user, new_score);
-    events::emit_score_changed(&env, &user, old_score, new_score, symbol_short!("increase"));
-}
-```
-
-**Validation Rules**:
-- Amount must be non-negative
-- Result must not overflow u32
-- Result must not exceed MAX_SCORE (100)
-
-**Events Emitted**:
-```rust
-Topic: (symbol_short!("SCORECHGD"), user)
-Data: (old_score: u32, new_score: u32, reason: Symbol("increase"))
-```
-
-**Related Files**:
-- `contracts/reputation-contract/src/lib.rs` - Increase score function
-- `contracts/reputation-contract/src/access.rs` - Updater authorization
-- `contracts/reputation-contract/src/events.rs` - Score change event
+**Tests:**
+- Overflow prevention
+- Max score boundary (100)
+- Unauthorized access rejection
 
 ---
 
-#### ✅ SC-07: Implement Decrease Reputation
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/lib.rs:60-75](../contracts/reputation-contract/src/lib.rs)
+### SC-07: Implement decrease reputation ✅
 
-**Description**:
-Allow authorized updaters to decrease user scores with explicit cause. Prevent underflow errors.
+**Status:** Completed
+**Files:**
+- [lib.rs:54-69](../contracts/reputation-contract/src/lib.rs#L54-L69)
 
-**Requirements**:
-- [x] Implement `decrease_score(updater: Address, user: Address, amount: u32)` function
-- [x] Require updater authorization
-- [x] Use checked arithmetic to prevent underflow
-- [x] Validate result is within bounds (0-100)
-- [x] Emit `SCORECHGD` event with reason
+**Implementation:**
+- ✅ Updater-only authorization
+- ✅ Underflow protection (min 0)
+- ✅ Event emission with reason
+- ✅ Zero-amount decreases allowed
 
-**Implementation Details**:
-```rust
-pub fn decrease_score(env: Env, updater: Address, user: Address, amount: u32) {
-    access::require_updater(&env, &updater);
-
-    let old_score = storage::get_score(&env, &user);
-    let new_score = old_score
-        .checked_sub(amount)
-        .ok_or_else(|| ReputationError::Underflow)
-        .unwrap();
-
-    storage::set_score(&env, &user, new_score);
-    events::emit_score_changed(&env, &user, old_score, new_score, symbol_short!("decrease"));
-}
-```
-
-**Validation Rules**:
-- Amount must be non-negative
-- Result must not underflow (go below 0)
-
-**Events Emitted**:
-```rust
-Topic: (symbol_short!("SCORECHGD"), user)
-Data: (old_score: u32, new_score: u32, reason: Symbol("decrease"))
-```
-
-**Use Cases**:
-- Late payment: -5 points
-- Missed payment: -10 points
-- Loan default: -30 points
-
-**Related Files**:
-- `contracts/reputation-contract/src/lib.rs` - Decrease score function
-- `contracts/reputation-contract/src/access.rs` - Updater authorization
-- `contracts/reputation-contract/src/events.rs` - Score change event
+**Tests:**
+- Underflow prevention
+- Min score boundary (0)
+- Unauthorized access rejection
 
 ---
 
-## Phase 3: CreditLine Core
+## Phase 3 — CreditLine Core ⚠️
 
-**Goal**: Implement core loan management functionality including creation, repayment, and default tracking.
+**Status:** PARTIALLY COMPLETED
+**Contract:** [creditline-contract](../contracts/creditline-contract/)
 
-**Dependencies**: Phase 1 (requires access control), Phase 2 (requires reputation queries)
+Handles loan creation, repayment, and default management.
 
-**Status**: ⏳ **PENDING**
+### SC-08: Implement loan creation ✅
 
-### Issues
+**Status:** Completed
+**Files:**
+- [lib.rs:52-100](../contracts/creditline-contract/src/lib.rs#L52-L100)
+- [types.rs](../contracts/creditline-contract/src/types.rs)
 
-#### ⏳ SC-08: Implement Loan Creation
-**Status**: Pending
-**Assigned**: Unassigned
+**Implementation:**
+- ✅ Loan creation with validation
+- ✅ Guarantee validation (minimum 20%)
+- ✅ Merchant validation (stubbed for Phase 5)
+- ✅ Reputation threshold check (min score 40)
+- ✅ Liquidity validation (stubbed for Phase 6)
+- ✅ Event emission (`LoanCreated`)
+- ✅ Loan counter auto-increment
 
-**Description**:
-Create loans with amount, guarantee deposit, repayment dates, and initial state. Validate all inputs and emit loan creation event.
+**Tests:** 15+ tests including:
+- Zero/negative amount rejection
+- Insufficient guarantee (19%, 10%)
+- Exact minimum guarantee edge cases
+- Contract initialization
 
-**Requirements**:
-- [ ] Define loan data structure (amount, guarantee, dates, merchant, status)
-- [ ] Implement `create_loan(...)` function with all required parameters
-- [ ] Validate user has sufficient guarantee deposit
-- [ ] Validate merchant is registered (query Merchant Registry)
-- [ ] Query user reputation to determine credit terms
-- [ ] Request funds from Liquidity Pool
-- [ ] Store loan with unique ID
-- [ ] Emit `LoanCreated` event
-
-**Proposed Function Signature**:
-```rust
-pub fn create_loan(
-    env: Env,
-    user: Address,
-    merchant: Address,
-    total_amount: i128,
-    guarantee_amount: i128,
-    repayment_schedule: Vec<RepaymentInstallment>,
-) -> u64  // Returns loan_id
-```
-
-**Validation Rules**:
-- `guarantee_amount` >= 20% of `total_amount`
-- Merchant must be active in Merchant Registry
-- User must meet minimum reputation threshold
-- Liquidity Pool must have sufficient funds
-
-**State Transitions**:
-```
-[No Loan] --create_loan()--> [Active Loan]
-```
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("LOANCRTD"), user, merchant)
-Data: (loan_id, total_amount, guarantee_amount, repayment_schedule)
-```
-
-**Related Contracts**:
-- Queries: Reputation Contract, Merchant Registry Contract
-- Transfers: Liquidity Pool Contract
+**Known Limitations:**
+- ⚠️ Merchant validation bypassed when registry not configured
+- ⚠️ Liquidity validation bypassed when pool not configured
 
 ---
 
-#### ⏳ SC-09: Implement Loan Repayment
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-09: Implement loan repayment ❌
 
-**Description**:
-Process loan repayment installments (partial and full payments). Update loan state and emit payment events.
+**Status:** NOT IMPLEMENTED
+**Files:** None
 
-**Requirements**:
-- [ ] Implement `repay_loan(loan_id: u64, amount: i128)` function
-- [ ] Validate loan exists and is active
-- [ ] Validate caller is loan borrower
-- [ ] Accept partial and full repayments
-- [ ] Update remaining balance
-- [ ] Transfer funds to Liquidity Pool
-- [ ] Mark loan as paid if fully repaid
-- [ ] Emit `LoanRepaid` event
+**Missing Functionality:**
+- ❌ `repay_loan()` function does not exist
+- ❌ Partial payment support
+- ❌ Full repayment logic
+- ❌ Remaining balance updates
+- ❌ Payment event emission (`LoanRepaid`)
+- ❌ Loan status transition to `Repaid`
 
-**Proposed Function Signature**:
+**Required Implementation:**
 ```rust
 pub fn repay_loan(
     env: Env,
     borrower: Address,
     loan_id: u64,
-    amount: i128,
-) -> Result<LoanStatus, CreditLineError>
+    amount: i128
+) -> i128 // returns remaining balance
 ```
 
-**Validation Rules**:
-- Loan must exist
-- Loan must be in Active status
-- Caller must be the borrower
-- Amount must be positive
-- Amount must not exceed remaining balance
-
-**State Transitions**:
-```
-[Active Loan] --repay_loan(partial)--> [Active Loan] (updated balance)
-[Active Loan] --repay_loan(full)--> [Paid Loan]
-```
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("LOANPAID"), borrower, loan_id)
-Data: (amount, remaining_balance, timestamp)
-```
-
-**Related Contracts**:
-- Transfers: Liquidity Pool Contract (receive repayment)
+**Tests Needed:**
+- Partial repayment scenarios
+- Full repayment completion
+- Overpayment handling
+- Unauthorized repayment attempts
+- Repayment on non-active loans
 
 ---
 
-#### ⏳ SC-10: Implement Loan Default
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-10: Implement loan default ✅
 
-**Description**:
-Mark overdue loans as defaulted. Handle guarantee forfeiture and update loan status.
+**Status:** Completed
+**Files:**
+- [lib.rs:222-276](../contracts/creditline-contract/src/lib.rs#L222-L276)
 
-**Requirements**:
-- [ ] Implement `mark_defaulted(loan_id: u64)` function
-- [ ] Validate loan is overdue (past final payment date)
-- [ ] Transfer guarantee to Liquidity Pool
-- [ ] Update loan status to Defaulted
-- [ ] Emit `LoanDefaulted` event
-- [ ] Trigger reputation decrease (Phase 4 integration)
+**Implementation:**
+- ✅ Mark loans as defaulted
+- ✅ Validate loan exists and is active
+- ✅ Check overdue status (past final payment date)
+- ✅ Guarantee forfeiture logic
+- ✅ Event emission (`LoanDefaulted`)
+- ✅ Status transition to `Defaulted`
 
-**Proposed Function Signature**:
-```rust
-pub fn mark_defaulted(
-    env: Env,
-    loan_id: u64,
-) -> Result<(), CreditLineError>
-```
+**Tests:**
+- Successful default marking
+- Premature default rejection (not yet overdue)
+- Loan not found scenarios
 
-**Validation Rules**:
-- Loan must exist
-- Loan must be in Active status
-- Current timestamp must be past final payment date
-- Can be called by anyone (permissionless enforcement)
-
-**State Transitions**:
-```
-[Active Loan] --mark_defaulted()--> [Defaulted Loan]
-```
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("LOANDFLT"), borrower, loan_id)
-Data: (total_amount, unpaid_balance, guarantee_forfeited, timestamp)
-```
-
-**Related Contracts**:
-- Transfers: Liquidity Pool Contract (receive forfeited guarantee)
-- Updates: Reputation Contract (decrease score - Phase 4)
+**Known Limitations:**
+- ⚠️ Calls reputation contract's `slash` method which doesn't exist (should call `decrease_score`)
+- ⚠️ Token transfer to liquidity pool stubbed (Phase 6 dependency)
 
 ---
 
-## Phase 4: CreditLine ↔ Reputation
+## Phase 4 — CreditLine ↔ Reputation Integration ⚠️
 
-**Goal**: Integrate CreditLine contract with Reputation contract to automatically adjust scores based on payment behavior.
+**Status:** INCOMPLETE
+**Contracts:** creditline-contract, reputation-contract
 
-**Dependencies**: Phase 2 (Reputation), Phase 3 (CreditLine)
+Bidirectional integration between credit behavior and reputation scores.
 
-**Status**: ⏳ **PENDING**
+### SC-11: Increase reputation on repayment ❌
 
-### Issues
+**Status:** NOT IMPLEMENTED
+**Dependencies:** SC-09 (loan repayment)
 
-#### ⏳ SC-11: Increase Reputation on Repayment
-**Status**: Pending
-**Assigned**: Unassigned
+**Missing Functionality:**
+- ❌ No call to reputation contract on successful repayment
+- ❌ Score increase logic not implemented
+- ❌ Repayment callback missing
 
-**Description**:
-Automatically increase user reputation score when loan payments are made successfully.
+**Required Work:**
+- Implement `repay_loan()` function
+- Add reputation contract invocation:
+  ```rust
+  env.invoke_contract::<()>(
+      &reputation_contract,
+      &symbol_short!("increase_score"),
+      (updater, borrower, amount).into_val(&env)
+  );
+  ```
 
-**Requirements**:
-- [ ] CreditLine contract registered as updater in Reputation contract
-- [ ] Call `increase_score()` on successful repayment
-- [ ] Calculate reputation increase based on payment behavior:
-  - On-time payment: +2 to +5 points
-  - Early payment: +5 to +10 points
-  - Full loan completion: +10 points
-- [ ] Only increase reputation if payment is on-time or early
-- [ ] Handle reputation contract errors gracefully
-
-**Proposed Implementation**:
-```rust
-// In CreditLine contract
-pub fn repay_loan(env: Env, borrower: Address, loan_id: u64, amount: i128) {
-    // ... existing repayment logic ...
-
-    // Calculate reputation increase
-    let reputation_increase = calculate_reputation_boost(&env, &loan, amount);
-
-    // Update reputation
-    reputation_contract.increase_score(&env.current_contract_address(), &borrower, &reputation_increase);
-}
-```
-
-**Reputation Increase Logic**:
-```rust
-fn calculate_reputation_boost(loan: &Loan, payment_amount: i128) -> u32 {
-    if is_early_payment(loan) {
-        10  // Bonus for early payment
-    } else if is_on_time_payment(loan) {
-        5   // Standard increase for on-time
-    } else if is_full_payment(loan, payment_amount) {
-        15  // Bonus for paying off entire loan
-    } else {
-        2   // Minimum increase for any payment
-    }
-}
-```
-
-**Edge Cases**:
-- Partial payments should give proportional increases
-- Late payments should NOT increase reputation
-- Multiple payments in same day should only count once
-
-**Related Contracts**:
-- Updates: Reputation Contract (`increase_score`)
+**Tests Needed:**
+- Score increase on full repayment
+- Score increase on on-time payment
+- Early payment bonus logic
+- Integration with reputation contract
 
 ---
 
-#### ⏳ SC-12: Decrease Reputation on Default
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-12: Decrease reputation on default ⚠️
 
-**Description**:
-Automatically decrease user reputation score when loans enter default status.
+**Status:** INCOMPLETE
+**Files:**
+- [lib.rs:263-272](../contracts/creditline-contract/src/lib.rs#L263-L272)
 
-**Requirements**:
-- [ ] CreditLine contract registered as updater in Reputation contract
-- [ ] Call `decrease_score()` when loan marked as defaulted
-- [ ] Calculate reputation decrease based on default severity:
-  - Single late payment: -5 points
-  - Missed payment: -10 points
-  - Full default: -30 points
-- [ ] Record explicit reason for reputation decrease
-- [ ] Handle reputation contract errors gracefully
+**Current Implementation:**
+- ⚠️ Calls `reputation_contract.slash()` which **does not exist**
+- ⚠️ Should call `decrease_score()` instead
+- ⚠️ No explicit reason/amount passed
 
-**Proposed Implementation**:
+**Required Fixes:**
 ```rust
-// In CreditLine contract
-pub fn mark_defaulted(env: Env, loan_id: u64) {
-    // ... existing default logic ...
+// Current (INCORRECT):
+env.invoke_contract::<()>(
+    &reputation_contract,
+    &symbol_short!("slash"),
+    (loan.borrower,).into_val(&env)
+);
 
-    let loan = get_loan(&env, loan_id)?;
-
-    // Calculate reputation penalty based on default severity
-    let reputation_penalty = calculate_default_penalty(&loan);
-
-    // Update reputation
-    reputation_contract.decrease_score(
-        &env.current_contract_address(),
-        &loan.borrower,
-        &reputation_penalty
-    );
-}
+// Should be:
+env.invoke_contract::<()>(
+    &reputation_contract,
+    &symbol_short!("decrease_score"),
+    (creditline_updater, loan.borrower, penalty_amount).into_val(&env)
+);
 ```
 
-**Reputation Decrease Logic**:
-```rust
-fn calculate_default_penalty(loan: &Loan) -> u32 {
-    let unpaid_ratio = loan.remaining_balance / loan.total_amount;
-
-    if unpaid_ratio >= 0.9 {
-        30  // Defaulted early, almost no payments made
-    } else if unpaid_ratio >= 0.5 {
-        20  // Defaulted midway
-    } else {
-        10  // Defaulted near end
-    }
-}
-```
-
-**Reputation Reason Codes**:
-- `"late"` - Late payment
-- `"missed"` - Missed payment deadline
-- `"default"` - Full loan default
-
-**Related Contracts**:
-- Updates: Reputation Contract (`decrease_score`)
+**Tests Needed:**
+- Score decrease on default
+- Correct penalty amount calculation
+- Event verification for score change
 
 ---
 
-## Phase 5: Merchant Registry
+## Phase 5 — Merchant Registry ⏳
 
-**Goal**: Implement merchant whitelist and validation system.
+**Status:** NOT STARTED
+**Contract:** merchant-registry-contract (empty)
 
-**Dependencies**: Phase 1 (requires admin for merchant management)
+Validates authorized merchants who can receive loan funding.
 
-**Status**: ⏳ **PENDING**
+### SC-13: Implement merchant registration ❌
 
-### Issues
+**Status:** NOT IMPLEMENTED
+**Files:** `contracts/merchant-registry-contract/.gitkeep` (empty directory)
 
-#### ⏳ SC-13: Implement Merchant Registration
-**Status**: Pending
-**Assigned**: Unassigned
+**Required Implementation:**
+- ❌ `register_merchant(admin, merchant, metadata)`
+- ❌ Merchant storage structure
+- ❌ Admin-only registration
+- ❌ Event emission (`MerchantRegistered`)
+- ❌ Metadata fields (name, category, etc.)
 
-**Description**:
-Allow admin to register authorized merchants with minimal metadata. Maintain merchant whitelist.
-
-**Requirements**:
-- [ ] Define merchant data structure (address, name, active status)
-- [ ] Implement `register_merchant(admin: Address, merchant: Address, name: String)` function
-- [ ] Require admin authorization
-- [ ] Store merchant data in contract storage
-- [ ] Set merchant as active by default
-- [ ] Emit `MerchantRegistered` event
-
-**Proposed Function Signature**:
-```rust
-pub fn register_merchant(
-    env: Env,
-    admin: Address,
-    merchant: Address,
-    name: String,
-) -> Result<(), MerchantRegistryError>
-```
-
-**Merchant Data Structure**:
-```rust
-pub struct MerchantInfo {
-    pub address: Address,
-    pub name: String,
-    pub active: bool,
-    pub registered_at: u64,  // timestamp
-}
-```
-
-**Validation Rules**:
-- Caller must be admin
-- Merchant address must not already be registered
-- Name must be non-empty (1-64 characters)
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("MRCHREGD"), merchant)
-Data: (name, timestamp)
-```
-
-**Related Files**: (To be created)
-- `contracts/merchant-registry-contract/src/lib.rs`
-- `contracts/merchant-registry-contract/src/storage.rs`
-- `contracts/merchant-registry-contract/src/errors.rs`
+**Tests Needed:**
+- Merchant registration
+- Duplicate registration prevention
+- Unauthorized registration rejection
+- Admin-only access control
 
 ---
 
-#### ⏳ SC-14: Implement Merchant Validation
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-14: Implement merchant validation ⚠️
 
-**Description**:
-Expose public function to validate if a merchant is active. Consumed by CreditLine contract.
+**Status:** STUBBED (not functional)
+**Files:**
+- [lib.rs:162-177](../contracts/creditline-contract/src/lib.rs#L162-L177)
 
-**Requirements**:
-- [ ] Implement `is_active_merchant(merchant: Address) -> bool` function
-- [ ] No authorization required (public read)
-- [ ] Return true only if merchant is registered AND active
-- [ ] Optimize for efficient queries
+**Current Implementation:**
+- ⚠️ Validation bypassed when registry not configured
+- ⚠️ Always assumes merchant is valid
+- ⚠️ TODO comment indicates placeholder
 
-**Proposed Function Signature**:
+**Required Implementation:**
 ```rust
 pub fn is_active_merchant(env: Env, merchant: Address) -> bool
+
+// In CreditLine:
+let is_valid: bool = env.invoke_contract(
+    &merchant_registry,
+    &symbol_short!("is_active"),
+    (merchant,).into_val(&env)
+);
 ```
 
-**Validation Logic**:
-```rust
-pub fn is_active_merchant(env: Env, merchant: Address) -> bool {
-    if let Some(merchant_info) = storage::get_merchant(&env, &merchant) {
-        merchant_info.active
-    } else {
-        false
-    }
-}
-```
-
-**Usage in CreditLine Contract**:
-```rust
-// Before creating loan, validate merchant
-let is_valid = merchant_registry.is_active_merchant(&merchant);
-if !is_valid {
-    panic_with_error!(&env, CreditLineError::InvalidMerchant);
-}
-```
-
-**Additional Functions** (optional):
-- `deactivate_merchant(admin: Address, merchant: Address)` - Admin can suspend merchants
-- `get_merchant_info(merchant: Address) -> Option<MerchantInfo>` - Query merchant details
-
-**Related Contracts**:
-- Consumed by: CreditLine Contract (loan creation validation)
+**Tests Needed:**
+- Active merchant approval
+- Inactive merchant rejection
+- Unregistered merchant rejection
 
 ---
 
-## Phase 6: Liquidity Pool
+## Phase 6 — Liquidity Pool ⏳
 
-**Goal**: Implement liquidity provider deposit/withdrawal system and interest distribution.
+**Status:** NOT STARTED
+**Contract:** None (does not exist)
 
-**Dependencies**: Phase 3 (CreditLine for loan funding/repayment)
+Manages liquidity provider deposits and loan funding.
 
-**Status**: ⏳ **PENDING**
+### SC-15: Implement deposit liquidity ❌
 
-### Issues
+**Status:** NOT IMPLEMENTED
 
-#### ⏳ SC-15: Implement Deposit Liquidity
-**Status**: Pending
-**Assigned**: Unassigned
+**Required Implementation:**
+- ❌ Contract creation
+- ❌ `deposit(provider, amount)` function
+- ❌ Share calculation and issuance
+- ❌ Token transfer handling (SAC tokens)
+- ❌ Event emission (`LiquidityDeposited`)
 
-**Description**:
-Allow investors to deposit funds into liquidity pool. Issue shares representing pool ownership.
-
-**Requirements**:
-- [ ] Define pool share data structure
-- [ ] Implement `deposit(provider: Address, amount: i128)` function
-- [ ] Transfer tokens from provider to pool
-- [ ] Calculate and issue shares based on current pool ratio
-- [ ] Store provider's share balance
-- [ ] Update total pool liquidity
-- [ ] Emit `LiquidityDeposited` event
-
-**Proposed Function Signature**:
-```rust
-pub fn deposit(env: Env, provider: Address, amount: i128) -> u128  // Returns shares issued
-```
-
-**Share Calculation**:
-```rust
-// First depositor sets initial ratio (1:1)
-if total_shares == 0 {
-    shares_to_issue = amount;
-} else {
-    // Subsequent deposits: shares proportional to pool value
-    shares_to_issue = (amount * total_shares) / total_pool_value;
-}
-```
-
-**Validation Rules**:
-- Amount must be positive
-- Provider must have sufficient balance
-- Provider must authorize token transfer
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("LIQDEPOS"), provider)
-Data: (amount, shares_issued, timestamp)
-```
-
-**Related Files**: (To be created)
-- `contracts/liquidity-pool-contract/src/lib.rs`
-- `contracts/liquidity-pool-contract/src/storage.rs`
-- `contracts/liquidity-pool-contract/src/shares.rs`
+**Tests Needed:**
+- First deposit (1:1 share ratio)
+- Subsequent deposits (proportional shares)
+- Share value calculation accuracy
+- Zero deposit rejection
 
 ---
 
-#### ⏳ SC-16: Implement Withdraw Liquidity
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-16: Implement withdraw liquidity ❌
 
-**Description**:
-Allow liquidity providers to withdraw funds based on their share ownership. Validate available liquidity.
+**Status:** NOT IMPLEMENTED
 
-**Requirements**:
-- [ ] Implement `withdraw(provider: Address, shares: u128)` function
-- [ ] Calculate withdrawal amount based on share ratio
-- [ ] Validate provider has sufficient shares
-- [ ] Validate pool has sufficient available liquidity
-- [ ] Burn provider's shares
-- [ ] Transfer tokens to provider
-- [ ] Update total pool liquidity
-- [ ] Emit `LiquidityWithdrawn` event
+**Required Implementation:**
+- ❌ `withdraw(provider, shares)` function
+- ❌ Share burning logic
+- ❌ Available liquidity checks
+- ❌ Withdrawal amount calculation
+- ❌ Event emission (`LiquidityWithdrawn`)
 
-**Proposed Function Signature**:
-```rust
-pub fn withdraw(env: Env, provider: Address, shares: u128) -> i128  // Returns amount withdrawn
-```
-
-**Withdrawal Calculation**:
-```rust
-withdrawal_amount = (shares * total_pool_value) / total_shares;
-available_liquidity = total_pool_value - total_loaned;
-
-if withdrawal_amount > available_liquidity {
-    panic_with_error!(&env, LiquidityPoolError::InsufficientLiquidity);
-}
-```
-
-**Validation Rules**:
-- Provider must have sufficient shares
-- Pool must have sufficient available (non-loaned) liquidity
-- Shares to burn must be positive
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("LIQWDRAW"), provider)
-Data: (amount, shares_burned, timestamp)
-```
-
-**Edge Cases**:
-- Partial withdrawals allowed (withdraw some but not all shares)
-- If pool is fully utilized (all funds loaned), withdrawals must wait
+**Tests Needed:**
+- Full withdrawal
+- Partial withdrawal
+- Insufficient liquidity rejection
+- Share burning verification
 
 ---
 
-#### ⏳ SC-17: Implement Interest Distribution
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-17: Implement interest distribution ❌
 
-**Description**:
-Distribute interest from loan repayments to liquidity providers based on share ownership.
+**Status:** NOT IMPLEMENTED
 
-**Requirements**:
-- [ ] Track interest accumulated from loan repayments
-- [ ] Update pool value when interest received
-- [ ] Interest automatically reflected in share value (no explicit distribution needed)
-- [ ] Implement `get_share_value() -> i128` function for transparency
-- [ ] Optional: Implement `claim_interest(provider: Address)` for explicit claims
-- [ ] Emit `InterestDistributed` event
+**Required Implementation:**
+- ❌ `distribute_interest()` function
+- ❌ Interest accumulation from repayments
+- ❌ Share value increase logic
+- ❌ Fee distribution (85% LP, 10% protocol, 5% merchant)
+- ❌ Event emission (`InterestDistributed`)
 
-**Proposed Function Signature**:
-```rust
-pub fn get_share_value(env: Env) -> i128  // Returns current value of 1 share
-
-pub fn receive_interest(env: Env, amount: i128)  // Called by CreditLine contract
-```
-
-**Interest Accumulation**:
-```rust
-// When CreditLine repays loan with interest
-pub fn receive_interest(env: Env, amount: i128) {
-    total_pool_value += amount;
-    // Share value automatically increases for all holders
-}
-
-// Share value calculation
-share_value = total_pool_value / total_shares;
-```
-
-**Fee Distribution** (optional):
-```rust
-// Example: 85% to LPs, 10% protocol fee, 5% merchant incentives
-interest_to_lps = interest_received * 0.85;
-protocol_fee = interest_received * 0.10;
-merchant_incentive = interest_received * 0.05;
-```
-
-**Events to Emit**:
-```rust
-Topic: (symbol_short!("INTRDIST"),)
-Data: (total_interest, new_share_value, timestamp)
-```
-
-**Related Contracts**:
-- Called by: CreditLine Contract (loan repayment processing)
+**Tests Needed:**
+- Interest calculation accuracy
+- Share value appreciation
+- Fee split verification
+- Multiple LP proportional distribution
 
 ---
 
-## Phase 7: Contract Tests
+## Phase 7 — Contract Testing ⚠️
 
-**Goal**: Comprehensive test coverage for all contracts and integration scenarios.
+**Status:** PARTIALLY COMPLETED
 
-**Dependencies**: All previous phases
+Comprehensive test coverage for all contracts.
 
-**Status**: 🚧 **IN PROGRESS** (Reputation tests complete)
+### SC-18: Unit tests for Reputation Contract ✅
 
-### Issues
+**Status:** Completed
+**Files:**
+- [tests.rs](../contracts/reputation-contract/src/tests.rs)
 
-#### ✅ SC-18: Unit Tests for Reputation Contract
-**Status**: Completed
-**Implementation**: [contracts/reputation-contract/src/tests.rs](../contracts/reputation-contract/src/tests.rs)
+**Test Coverage:** 26+ tests
+- ✅ Admin management (6 tests)
+- ✅ Updater authorization (5 tests)
+- ✅ Score mutations (increase, decrease, set) (8 tests)
+- ✅ Overflow/underflow protection (6 tests)
+- ✅ Event emission (6 tests)
+- ✅ Edge cases (zero amounts, boundary values)
 
-**Description**:
-Comprehensive unit tests covering admin, updaters, score operations, and edge cases.
-
-**Requirements**:
-- [x] Test admin initialization and transfer
-- [x] Test updater registration and authorization
-- [x] Test score increase/decrease operations
-- [x] Test bounds validation (0-100 range)
-- [x] Test overflow/underflow prevention
-- [x] Test unauthorized access attempts
-- [x] Test event emission
-- [x] Achieve >90% code coverage
-
-**Implemented Tests** (10 tests):
-
-1. ✅ `it_sets_admin` - Admin initialization
-2. ✅ `it_gets_admin` - Admin retrieval
-3. ✅ `it_sets_updater` - Updater registration
-4. ✅ `it_checks_updater` - Updater status check
-5. ✅ `it_gets_score` - Score retrieval (with default)
-6. ✅ `it_increases_score` - Score increment
-7. ✅ `it_decreases_score` - Score decrement
-8. ✅ `it_sets_score` - Direct score setting
-9. ✅ `it_prevents_unauthorized_updates` - Authorization validation
-10. ✅ `it_enforces_score_bounds` - Bounds validation
-11. ✅ `it_gets_version` - Version retrieval
-
-**Test Coverage**:
-- Function coverage: 100%
-- Authorization paths: 100%
-- Error conditions: 100%
-- Edge cases: Covered (min/max scores, overflow/underflow)
-
-**Related Files**:
-- `contracts/reputation-contract/src/tests.rs`
+**Coverage Assessment:** Excellent — All core functionality tested
 
 ---
 
-#### ⏳ SC-19: Unit Tests for CreditLine Contract
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-19: Unit tests for CreditLine Contract ⚠️
 
-**Description**:
-Comprehensive unit tests for loan creation, repayment, and default flows. Validate state transitions.
+**Status:** INCOMPLETE
+**Files:**
+- [tests.rs](../contracts/creditline-contract/src/tests.rs)
 
-**Requirements**:
-- [ ] Test loan creation with valid parameters
-- [ ] Test loan creation with invalid inputs (insufficient guarantee, invalid merchant)
-- [ ] Test partial loan repayment
-- [ ] Test full loan repayment
-- [ ] Test loan default marking
-- [ ] Test unauthorized actions
-- [ ] Test state transition validation (Active → Paid, Active → Defaulted)
-- [ ] Test integration with Reputation contract (score updates)
-- [ ] Test integration with Merchant Registry (merchant validation)
-- [ ] Test integration with Liquidity Pool (fund transfers)
-- [ ] Achieve >90% code coverage
+**Test Coverage:** 15+ tests
+- ✅ Initialization and admin management
+- ✅ Loan creation validations (amounts, guarantees)
+- ✅ Mark defaulted functionality
+- ✅ Contract address updates
+- ❌ **MISSING:** Loan repayment tests (SC-09 not implemented)
+- ❌ **MISSING:** Reputation integration tests
+- ❌ **MISSING:** Merchant validation tests (Phase 5)
+- ❌ **MISSING:** Liquidity pool integration tests (Phase 6)
 
-**Proposed Test Cases**:
-
-1. **Loan Creation Tests**:
-   - `test_create_loan_success` - Happy path
-   - `test_create_loan_insufficient_guarantee` - Validation error
-   - `test_create_loan_invalid_merchant` - Merchant check fails
-   - `test_create_loan_insufficient_liquidity` - Pool has no funds
-
-2. **Repayment Tests**:
-   - `test_repay_partial` - Partial payment
-   - `test_repay_full` - Full payment, loan marked paid
-   - `test_repay_unauthorized` - Non-borrower tries to repay
-   - `test_repay_overpayment` - Payment exceeds remaining balance
-
-3. **Default Tests**:
-   - `test_mark_defaulted_overdue` - Mark loan defaulted when overdue
-   - `test_mark_defaulted_early` - Cannot default loan before due date
-   - `test_default_reputation_decrease` - Verify reputation penalty
-
-4. **State Transition Tests**:
-   - `test_cannot_repay_defaulted_loan` - No repayment after default
-   - `test_cannot_repay_paid_loan` - No repayment after full payment
-
-**Related Files**: (To be created)
-- `contracts/creditline-contract/src/tests.rs`
+**Required Tests:**
+- Repayment scenarios (partial, full, overpayment)
+- Reputation score updates on payment/default
+- End-to-end loan lifecycle (create → repay → complete)
+- Integration tests with all external contracts
 
 ---
 
-#### ⏳ SC-20: Unit Tests for Liquidity Pool
-**Status**: Pending
-**Assigned**: Unassigned
+### SC-20: Unit tests for Liquidity Pool ❌
 
-**Description**:
-Comprehensive tests for deposit, withdrawal, and interest distribution. Cover low liquidity scenarios.
+**Status:** NOT STARTED
+**Reason:** Contract does not exist
 
-**Requirements**:
-- [ ] Test initial deposit (share issuance)
-- [ ] Test subsequent deposits (share calculation)
-- [ ] Test withdrawal with sufficient liquidity
-- [ ] Test withdrawal with insufficient liquidity (error)
-- [ ] Test interest accumulation and share value increase
-- [ ] Test loan funding (liquidity allocation)
-- [ ] Test repayment processing (liquidity return)
-- [ ] Test edge case: withdraw all liquidity
-- [ ] Test edge case: pool fully utilized (no available liquidity)
-- [ ] Achieve >90% code coverage
-
-**Proposed Test Cases**:
-
-1. **Deposit Tests**:
-   - `test_first_deposit` - Initial LP, 1:1 share ratio
-   - `test_subsequent_deposit` - Share calculation based on pool value
-   - `test_deposit_after_interest` - Share value reflects interest
-
-2. **Withdrawal Tests**:
-   - `test_withdraw_partial` - Withdraw some shares
-   - `test_withdraw_full` - Withdraw all shares
-   - `test_withdraw_insufficient_liquidity` - Pool fully loaned, withdrawal fails
-   - `test_withdraw_too_many_shares` - LP tries to withdraw more than owned
-
-3. **Interest Tests**:
-   - `test_interest_distribution` - Share value increases with interest
-   - `test_multiple_lps_interest` - Interest fairly distributed
-   - `test_share_value_calculation` - Verify share value formula
-
-4. **Integration Tests**:
-   - `test_loan_funding_reduces_available_liquidity`
-   - `test_repayment_increases_available_liquidity`
-   - `test_withdrawal_blocked_when_pool_utilized`
-
-**Related Files**: (To be created)
-- `contracts/liquidity-pool-contract/src/tests.rs`
+**Required Tests:**
+- Deposit scenarios (first LP, subsequent LPs)
+- Share calculation accuracy
+- Withdrawal scenarios (partial, full)
+- Interest distribution
+- Low liquidity edge cases
+- Share value appreciation
+- Multiple LP interactions
 
 ---
 
-## Progress Tracking
+## Summary Dashboard
 
-### Completed Milestones
-- ✅ **Reputation Contract MVP** - Fully functional with tests (SC-01 through SC-07, SC-18)
-- ✅ **CI/CD Pipeline** - GitHub Actions workflow for build and test
+### Overall Progress: 11/20 Issues Completed (55%)
 
-### Current Focus
-- 🎯 **Phase 3: CreditLine Core** - Next major milestone
+| Phase | Status | Completed | Total | Progress |
+|-------|--------|-----------|-------|----------|
+| Phase 1: Access Control | ✅ Complete | 3/3 | 3 | 100% |
+| Phase 2: Reputation | ✅ Complete | 4/4 | 4 | 100% |
+| Phase 3: CreditLine Core | ⚠️ Partial | 2/3 | 3 | 67% |
+| Phase 4: Integration | ⚠️ Partial | 0/2 | 2 | 0% |
+| Phase 5: Merchant Registry | ⏳ Pending | 0/2 | 2 | 0% |
+| Phase 6: Liquidity Pool | ⏳ Pending | 0/3 | 3 | 0% |
+| Phase 7: Testing | ⚠️ Partial | 1/3 | 3 | 33% |
 
-### Upcoming Milestones
-1. CreditLine Contract implementation (SC-08, SC-09, SC-10)
-2. CreditLine ↔ Reputation integration (SC-11, SC-12)
-3. Merchant Registry implementation (SC-13, SC-14)
-4. Liquidity Pool implementation (SC-15, SC-16, SC-17)
-5. Complete test coverage (SC-19, SC-20)
+### By Status
 
-### Long-term Goals
-- Smart contract auditing
-- Testnet deployment
-- Mainnet deployment
-- Frontend integration
-- Governance token launch
+- ✅ **Completed:** 11 issues
+- ⚠️ **Incomplete/Partial:** 4 issues
+- ❌ **Not Started:** 5 issues
 
 ---
 
-## Development Standards
+## Critical Blockers
 
-### Issue Workflow
-1. **Planning**: Define requirements and acceptance criteria
-2. **Implementation**: Write contract code following module pattern
-3. **Testing**: Write comprehensive unit tests
-4. **Review**: Code review and security audit
-5. **Deployment**: Deploy to testnet, then mainnet
+### 1. SC-09: Implement loan repayment ❌
 
-### Branch Strategy
-- `main` - Production-ready code
-- `develop` - Integration branch
-- `feat/<issue-id>-<description>` - Feature branches (e.g., `feat/SC-08-loan-creation`)
-- `fix/<issue-id>-<description>` - Bug fix branches
+**Impact:** HIGH
+**Blocks:**
+- SC-11 (reputation increase on repayment)
+- SC-19 (CreditLine tests incomplete)
+- Core BNPL functionality unusable
 
-### Commit Standards
-Follow Conventional Commits:
-```
-feat: implement loan creation (SC-08)
-fix: prevent overflow in score calculation (SC-06)
-test: add boundary tests for reputation (SC-18)
-docs: update roadmap with completed issues
-```
-
-### Definition of Done
-- [ ] Code implemented and follows module pattern
-- [ ] Unit tests written with >90% coverage
-- [ ] Documentation updated (README, inline comments)
-- [ ] Code reviewed by at least one other developer
-- [ ] CI/CD pipeline passes (build + test)
-- [ ] Roadmap updated with completion status
+**Effort:** Medium (2-3 days)
 
 ---
 
-## Questions or Feedback?
+### 2. SC-12: Fix reputation decrease on default ⚠️
 
-If you have questions about the roadmap or want to contribute:
-1. Check existing GitHub issues
-2. Review [Contributing Guide](CONTRIBUTING.md)
-3. Open a new issue for discussion
-4. Join our community chat (link TBD)
+**Impact:** MEDIUM
+**Current Issue:** Calls non-existent `slash()` method instead of `decrease_score()`
+**Effort:** Low (1-2 hours)
 
 ---
 
-**Last Updated**: 2026-01-15
-**Maintained By**: TrustUp Core Team
+### 3. SC-13, SC-14: Merchant Registry ❌
+
+**Impact:** MEDIUM
+**Current Workaround:** Validation bypassed in CreditLine
+**Security Risk:** Any address can be treated as valid merchant
+**Effort:** Medium (2-3 days)
+
+---
+
+### 4. SC-15, SC-16, SC-17: Liquidity Pool ❌
+
+**Impact:** HIGH
+**Current Issue:** No funding source for loans
+**Blocks:** End-to-end loan flow testing
+**Effort:** High (1-2 weeks)
+
+---
+
+## Next Steps (Recommended Order)
+
+1. **Immediate (Week 1)**
+   - [ ] Fix SC-12: Update `mark_defaulted` to call `decrease_score` properly
+   - [ ] Implement SC-09: `repay_loan()` function in CreditLine
+   - [ ] Implement SC-11: Add reputation increase on repayment
+
+2. **Short Term (Week 2-3)**
+   - [ ] Implement SC-13: Merchant Registry contract
+   - [ ] Implement SC-14: Merchant validation integration
+   - [ ] Update SC-19: Add comprehensive CreditLine tests
+
+3. **Medium Term (Month 1-2)**
+   - [ ] Implement SC-15: Liquidity Pool deposit
+   - [ ] Implement SC-16: Liquidity Pool withdrawal
+   - [ ] Implement SC-17: Interest distribution
+   - [ ] Implement SC-20: Liquidity Pool tests
+
+4. **Polish (Month 2+)**
+   - [ ] Integration testing across all contracts
+   - [ ] Security audit preparation
+   - [ ] Gas optimization
+   - [ ] Documentation updates
+
+---
+
+## Unplanned Contracts
+
+### adapter-trustless-contract
+
+**Status:** Empty (`.gitkeep` only)
+**Purpose:** Unknown — not in original roadmap
+**Action Required:** Clarify scope or remove
+
+---
+
+## Notes
+
+- All completed phases (1-2) have excellent test coverage
+- CreditLine contract is well-structured but missing key repayment logic
+- No integration tests exist yet between contracts
+- Security considerations documented in [ERROR_CODES.md](ERROR_CODES.md)
+
+---
+
+**Last Updated:** 2026-02-13
+**Document Owner:** TrustUp Development Team
+**Related Docs:** [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | [ARCHITECTURE.md](ARCHITECTURE.md) | [CONTRIBUTING.md](CONTRIBUTING.md)

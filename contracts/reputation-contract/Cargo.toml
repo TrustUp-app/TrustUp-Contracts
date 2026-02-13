@@ -9,8 +9,17 @@ crate-type = ["cdylib"]
 [dependencies]
 soroban-sdk = "22.0.0"
 
+# OpenZeppelin Stellar Contracts - Security and standard implementations
+# Note: These are optional and can be uncommented when needed
+# To use specific OpenZeppelin packages, uncomment the ones you need:
+# openzeppelin-access = { git = "https://github.com/OpenZeppelin/stellar-contracts", branch = "main" }
+# openzeppelin-token = { git = "https://github.com/OpenZeppelin/stellar-contracts", branch = "main" }
+# openzeppelin-utils = { git = "https://github.com/OpenZeppelin/stellar-contracts", branch = "main" }
+
 [dev-dependencies]
 soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+# OpenZeppelin Testing Helpers (optional)
+# soroban-test-helpers = { git = "https://github.com/OpenZeppelin/soroban-helpers", branch = "main" }
 
 [profile.release]
 opt-level = "z"
