@@ -7,7 +7,6 @@ members = [
 resolver = "2"
 
 # Future contracts:
-# - contracts/merchant-registry-contract
 # - contracts/adapter-trustless-contract
 
 [profile.release]

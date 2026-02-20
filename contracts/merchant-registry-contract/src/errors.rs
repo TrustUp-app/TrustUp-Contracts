@@ -9,4 +9,5 @@ pub enum Error {
     MerchantAlreadyRegistered = 3,
     MerchantNotFound = 4,
     InvalidName = 5,
+    Unauthorized = 6,
 }

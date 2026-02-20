@@ -38,13 +38,13 @@ impl MerchantRegistryContract {
             return Err(Error::NotInitialized);
         }
 
-        access::require_admin(&env, &admin);
+        // ⬇️ Updated to handle the Result
+        access::require_admin(&env, &admin)?;
 
         if storage::has_merchant(&env, &merchant) {
             return Err(Error::MerchantAlreadyRegistered);
         }
 
-        // Validate name (non-empty, limits)
         if name.len() == 0 || name.len() > 64 {
             return Err(Error::InvalidName);
         }
@@ -52,7 +52,7 @@ impl MerchantRegistryContract {
         let info = MerchantInfo {
             name: name.clone(),
             registration_date: env.ledger().timestamp(),
-            active: true, // Default to true upon registration
+            active: true,
             total_sales: 0,
         };
 
@@ -65,7 +65,11 @@ impl MerchantRegistryContract {
 
     /// Deactivates an existing merchant
     pub fn deactivate_merchant(env: Env, admin: Address, merchant: Address) -> Result<(), Error> {
-        access::require_admin(&env, &admin);
+        if !storage::has_admin(&env) {
+            return Err(Error::NotInitialized);
+        }
+
+        access::require_admin(&env, &admin)?;
 
         let mut info = storage::get_merchant(&env, &merchant).ok_or(Error::MerchantNotFound)?;
 
@@ -78,7 +82,11 @@ impl MerchantRegistryContract {
 
     /// Activates an existing merchant
     pub fn activate_merchant(env: Env, admin: Address, merchant: Address) -> Result<(), Error> {
-        access::require_admin(&env, &admin);
+        if !storage::has_admin(&env) {
+            return Err(Error::NotInitialized);
+        }
+
+        access::require_admin(&env, &admin)?;
 
         let mut info = storage::get_merchant(&env, &merchant).ok_or(Error::MerchantNotFound)?;
 
@@ -89,7 +97,6 @@ impl MerchantRegistryContract {
         Ok(())
     }
 
-    /// Fast boolean check for CreditLine usage
     pub fn is_active(env: Env, merchant: Address) -> bool {
         if let Some(info) = storage::get_merchant(&env, &merchant) {
             info.active
@@ -98,12 +105,10 @@ impl MerchantRegistryContract {
         }
     }
 
-    /// Retrieves full merchant data
     pub fn get_merchant_info(env: Env, merchant: Address) -> Result<MerchantInfo, Error> {
         storage::get_merchant(&env, &merchant).ok_or(Error::MerchantNotFound)
     }
 
-    /// Returns the total number of registered merchants
     pub fn get_merchant_count(env: Env) -> u64 {
         storage::get_merchant_count(&env)
     }
