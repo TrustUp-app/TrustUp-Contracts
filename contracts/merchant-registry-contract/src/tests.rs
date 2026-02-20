@@ -8,7 +8,8 @@ use soroban_sdk::{
 
 /// Helper function to set up the environment, contract, and test addresses.
 fn setup<'a>(env: &'a Env) -> (MerchantRegistryContractClient<'a>, Address, Address) {
-    let contract_id = env.register_contract(None, MerchantRegistryContract);
+    // Using the updated register syntax
+    let contract_id = env.register(MerchantRegistryContract, ());
     let client = MerchantRegistryContractClient::new(env, &contract_id);
     let admin = Address::generate(env);
     let merchant = Address::generate(env);
@@ -22,7 +23,8 @@ fn setup<'a>(env: &'a Env) -> (MerchantRegistryContractClient<'a>, Address, Addr
 #[test]
 fn test_initialization() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, MerchantRegistryContract);
+    // Using the updated register syntax
+    let contract_id = env.register(MerchantRegistryContract, ());
     let client = MerchantRegistryContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
