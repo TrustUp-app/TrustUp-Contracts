@@ -2,6 +2,7 @@
 members = [
     "contracts/reputation-contract",
     "contracts/creditline-contract",
+    "contracts/merchant-registry-contract",
 ]
 resolver = "2"
 
