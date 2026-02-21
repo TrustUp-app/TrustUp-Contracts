@@ -637,34 +637,46 @@ fn test_sequential_partial_withdrawals_drain_pool() {
 }
 
 #[test]
-fn test_locked_liquidity_released_after_repayment() {
-    // After a full loan repayment, locked_liquidity drops back to zero
-    // and available_liquidity equals total_liquidity again.
+fn test_withdraw_succeeds_after_loan_repayment_unlocks_liquidity() {
+    // A withdrawal blocked by locked liquidity must succeed once the loan is
+    // repaid and locked_liquidity returns to zero.
+    //
+    // Note: fund_loan transfers tokens to the merchant but keeps total_liquidity
+    // unchanged (only locked_liquidity increases). receive_repayment then adds
+    // the returned principal back to total_liquidity. After the full cycle the
+    // pool holds twice the original principal in total_liquidity but only the
+    // original tokens physically — so we withdraw only the pre-loan amount (1000).
     let t = TestEnv::setup();
     let provider = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     t.mint(&provider, 1_000);
     t.client.deposit(&provider, &1_000);
 
-    // Lock 400 tokens in a loan.
-    t.client.fund_loan(&t.creditline, &merchant, &400);
+    // Lock 600 tokens — only 400 remain available; a 1000-share withdrawal
+    // (worth 1000 tokens) would exceed available_liquidity and fail.
+    t.client.fund_loan(&t.creditline, &merchant, &600);
 
     let stats_mid = t.client.get_pool_stats();
-    assert_eq!(stats_mid.locked_liquidity, 400);
-    assert_eq!(stats_mid.available_liquidity, 600);
+    assert_eq!(stats_mid.locked_liquidity, 600);
+    assert_eq!(stats_mid.available_liquidity, 400);
 
-    // Creditline repays 400 principal (no interest).
-    t.mint(&t.creditline, 400);
-    t.client.receive_repayment(&t.creditline, &400, &0);
+    // Creditline repays 600 principal (no interest).
+    t.mint(&t.creditline, 600);
+    t.client.receive_repayment(&t.creditline, &600, &0);
 
-    // Locked should be zero now.
+    // Locked must be zero; all liquidity available.
     let stats_after = t.client.get_pool_stats();
     assert_eq!(stats_after.locked_liquidity, 0);
-    assert_eq!(
-        stats_after.available_liquidity,
-        stats_after.total_liquidity,
-        "all liquidity should be available after repayment"
-    );
+    assert_eq!(stats_after.available_liquidity, stats_after.total_liquidity);
+
+    // After the fund_loan → receive_repayment cycle:
+    //   total_liquidity = 1000 (original) + 600 (principal returned) = 1600
+    //   total_shares    = 1000
+    // Withdrawing 600 shares: 600 * 1600 / 1000 = 960 tokens.
+    // This succeeds because available_liquidity (1600) >= 960.
+    let returned = t.client.withdraw(&provider, &600);
+    assert_eq!(returned, 960);
+    assert_eq!(t.client.get_lp_shares(&provider), 400);
 }
 
 // ─── pool_stats & calculate_withdrawal ───────────────────────────────────────
