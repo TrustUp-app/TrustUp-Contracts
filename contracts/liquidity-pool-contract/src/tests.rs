@@ -515,6 +515,158 @@ fn test_receive_guarantee_reduces_locked_and_recovers_liquidity() {
     assert_eq!(stats.total_liquidity, 1_100);
 }
 
+// ─── withdraw (additional edge cases) ────────────────────────────────────────
+
+#[test]
+fn test_withdraw_returns_tokens_to_provider() {
+    // Verify that tokens actually land in the provider's wallet after withdrawal.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 2_000);
+
+    t.client.deposit(&provider, &2_000);
+    assert_eq!(t.token.balance(&provider), 0);
+
+    t.client.withdraw(&provider, &2_000);
+    assert_eq!(t.token.balance(&provider), 2_000);
+}
+
+#[test]
+fn test_withdraw_updates_pool_stats_correctly() {
+    // After partial withdrawal, stats must reflect the remaining state.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 3_000);
+
+    t.client.deposit(&provider, &3_000);
+    t.client.withdraw(&provider, &1_000);
+
+    let stats = t.client.get_pool_stats();
+    assert_eq!(stats.total_liquidity, 2_000);
+    assert_eq!(stats.total_shares, 2_000);
+    assert_eq!(stats.locked_liquidity, 0);
+    assert_eq!(stats.available_liquidity, 2_000);
+}
+
+#[test]
+fn test_two_providers_independent_withdrawals() {
+    // Provider A and B each deposit; each can withdraw their own portion
+    // without affecting the other's entitlement.
+    let t = TestEnv::setup();
+    let provider_a = Address::generate(&t.env);
+    let provider_b = Address::generate(&t.env);
+    t.mint(&provider_a, 1_000);
+    t.mint(&provider_b, 2_000);
+
+    t.client.deposit(&provider_a, &1_000);
+    t.client.deposit(&provider_b, &2_000);
+
+    // A withdraws all their shares (1000 out of 3000 total = 1/3 of pool)
+    let returned_a = t.client.withdraw(&provider_a, &1_000);
+    assert_eq!(returned_a, 1_000);
+    assert_eq!(t.client.get_lp_shares(&provider_a), 0);
+
+    // B's shares and pool value are intact
+    assert_eq!(t.client.get_lp_shares(&provider_b), 2_000);
+    let stats = t.client.get_pool_stats();
+    assert_eq!(stats.total_liquidity, 2_000);
+    assert_eq!(stats.total_shares, 2_000);
+
+    // B withdraws everything
+    let returned_b = t.client.withdraw(&provider_b, &2_000);
+    assert_eq!(returned_b, 2_000);
+
+    let stats_final = t.client.get_pool_stats();
+    assert_eq!(stats_final.total_liquidity, 0);
+    assert_eq!(stats_final.total_shares, 0);
+}
+
+#[test]
+fn test_withdraw_partial_when_some_liquidity_locked() {
+    // If only part of liquidity is locked, a partial withdrawal of the
+    // available portion should succeed.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client.deposit(&provider, &1_000);
+
+    // Lock 400 tokens in a loan → 600 available
+    t.client.fund_loan(&t.creditline, &merchant, &400);
+
+    // Withdraw shares worth exactly 600 tokens (should pass)
+    // shares_to_withdraw = 600 * 1000 / 1000 = 600 shares
+    let returned = t.client.withdraw(&provider, &600);
+    assert_eq!(returned, 600);
+
+    let stats = t.client.get_pool_stats();
+    assert_eq!(stats.total_liquidity, 400);
+    assert_eq!(stats.locked_liquidity, 400);
+    assert_eq!(stats.available_liquidity, 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_withdraw_negative_shares_fails() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client.deposit(&provider, &1_000);
+    t.client.withdraw(&provider, &-1);
+}
+
+#[test]
+fn test_sequential_partial_withdrawals_drain_pool() {
+    // Withdraw in two steps and confirm pool reaches zero correctly.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+
+    t.client.deposit(&provider, &1_000);
+
+    let first = t.client.withdraw(&provider, &600);
+    assert_eq!(first, 600);
+
+    let second = t.client.withdraw(&provider, &400);
+    assert_eq!(second, 400);
+
+    assert_eq!(t.client.get_lp_shares(&provider), 0);
+    let stats = t.client.get_pool_stats();
+    assert_eq!(stats.total_liquidity, 0);
+    assert_eq!(stats.total_shares, 0);
+}
+
+#[test]
+fn test_locked_liquidity_released_after_repayment() {
+    // After a full loan repayment, locked_liquidity drops back to zero
+    // and available_liquidity equals total_liquidity again.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client.deposit(&provider, &1_000);
+
+    // Lock 400 tokens in a loan.
+    t.client.fund_loan(&t.creditline, &merchant, &400);
+
+    let stats_mid = t.client.get_pool_stats();
+    assert_eq!(stats_mid.locked_liquidity, 400);
+    assert_eq!(stats_mid.available_liquidity, 600);
+
+    // Creditline repays 400 principal (no interest).
+    t.mint(&t.creditline, 400);
+    t.client.receive_repayment(&t.creditline, &400, &0);
+
+    // Locked should be zero now.
+    let stats_after = t.client.get_pool_stats();
+    assert_eq!(stats_after.locked_liquidity, 0);
+    assert_eq!(
+        stats_after.available_liquidity,
+        stats_after.total_liquidity,
+        "all liquidity should be available after repayment"
+    );
+}
+
 // ─── pool_stats & calculate_withdrawal ───────────────────────────────────────
 
 #[test]
