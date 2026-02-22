@@ -993,9 +993,9 @@ fn test_set_merchant_registry_by_non_admin_fails() {
 #[should_panic(expected = "Error(Contract, #1)")] // NotAdmin
 fn test_set_liquidity_pool_by_non_admin_fails() {
     let t = TestCtx::setup();
-    let _intruder = Address::generate(&t.env);
+    let intruder = Address::generate(&t.env);
     let new_pool = Address::generate(&t.env);
-    t.client.set_liquidity_pool(&_intruder, &new_pool);
+    t.client.set_liquidity_pool(&intruder, &new_pool);
 }
 
 #[test]
@@ -1047,20 +1047,21 @@ fn test_full_repayment_sets_status_to_paid() {
 
 #[test]
 #[ignore = "repay() not yet implemented — Phase 4"]
+#[should_panic(expected = "Error(Contract, #9)")] // InvalidAmount
 fn test_overpayment_is_rejected() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    // Paying more than remaining_balance should panic
+    // Paying more than remaining_balance should panic with InvalidAmount
     // TODO: t.client.repay(&user, &loan_id, &1001);
     let _ = loan_id;
-    panic!("Overpayment should have been rejected");
 }
 
 #[test]
 #[ignore = "repay() not yet implemented — Phase 4"]
+#[should_panic(expected = "Error(Contract, #8)")] // NotBorrower
 fn test_unauthorized_repayment_is_rejected() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
@@ -1068,14 +1069,14 @@ fn test_unauthorized_repayment_is_rejected() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    // A different address trying to repay the loan must fail
+    // A different address trying to repay the loan must fail with NotBorrower
     // TODO: t.client.repay(&intruder, &loan_id, &200);
-    let _ = loan_id;
-    panic!("Unauthorized repayment should have been rejected");
+    let _ = (loan_id, intruder);
 }
 
 #[test]
 #[ignore = "repay() not yet implemented — Phase 4"]
+#[should_panic(expected = "Error(Contract, #7)")] // LoanNotActive
 fn test_repayment_on_non_active_loan_is_rejected() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
@@ -1088,9 +1089,9 @@ fn test_repayment_on_non_active_loan_is_rejected() {
     t.advance_past(5000);
     t.client.mark_defaulted(&loan_id);
 
-    // Attempting to repay a Defaulted loan must fail
+    // Attempting to repay a Defaulted loan must fail with LoanNotActive
     // TODO: t.client.repay(&user, &loan_id, &1000);
-    panic!("Repayment on defaulted loan should have been rejected");
+    let _ = loan_id;
 }
 
 #[test]
@@ -1140,28 +1141,26 @@ fn test_active_merchant_can_receive_loan() {
 
 #[test]
 #[ignore = "merchant registry integration not yet implemented — Phase 5"]
+#[should_panic(expected = "Error(Contract, #3)")] // MerchantNotActive
 fn test_inactive_merchant_loan_is_rejected() {
     // A merchant that is registered but set to inactive must fail
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let inactive_merchant = Address::generate(&t.env);
     // TODO: wire up a MockMerchantRegistry that returns is_active=false for inactive_merchant
-    // Should panic with MerchantNotActive (error 3)
     let _ = t.create_default_loan(&user, &inactive_merchant);
-    panic!("Expected MerchantNotActive error");
 }
 
 #[test]
 #[ignore = "merchant registry integration not yet implemented — Phase 5"]
+#[should_panic(expected = "Error(Contract, #3)")] // MerchantNotActive
 fn test_unregistered_merchant_loan_is_rejected() {
     // A merchant address unknown to the registry must fail
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let unknown_merchant = Address::generate(&t.env);
     // TODO: wire up a MockMerchantRegistry that returns None for unknown_merchant
-    // Should panic with MerchantNotActive (error 3)
     let _ = t.create_default_loan(&user, &unknown_merchant);
-    panic!("Expected MerchantNotActive error for unregistered merchant");
 }
 
 // ─── liquidity pool integration — TDD stubs (Phase 6) ────────────────────────
@@ -1210,15 +1209,14 @@ fn test_guarantee_transferred_to_pool_on_default() {
 
 #[test]
 #[ignore = "liquidity pool integration not yet implemented — Phase 6"]
+#[should_panic(expected = "Error(Contract, #5)")] // InsufficientLiquidity
 fn test_insufficient_liquidity_rejects_loan_creation() {
     // When pool does not have enough available liquidity, create_loan must fail
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     // TODO: wire up a MockLiquidityPool that returns available=0
-    // Should panic with InsufficientLiquidity (error 5)
     let _ = t.create_default_loan(&user, &merchant);
-    panic!("Expected InsufficientLiquidity error");
 }
 
 // ─── complete loan lifecycle ──────────────────────────────────────────────────
