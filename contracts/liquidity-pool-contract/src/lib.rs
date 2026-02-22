@@ -5,6 +5,7 @@ mod errors;
 mod events;
 mod storage;
 mod types;
+mod liquidity_pool_tests;
 
 pub use errors::LiquidityPoolError;
 pub use types::PoolStats;
