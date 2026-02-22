@@ -2,12 +2,12 @@
 members = [
     "contracts/reputation-contract",
     "contracts/creditline-contract",
+    "contracts/merchant-registry-contract",
     "contracts/liquidity-pool-contract",
 ]
 resolver = "2"
 
 # Future contracts:
-# - contracts/merchant-registry-contract
 # - contracts/adapter-trustless-contract
 
 [profile.release]
