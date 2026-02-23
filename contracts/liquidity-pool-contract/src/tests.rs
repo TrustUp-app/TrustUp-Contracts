@@ -38,8 +38,7 @@ impl TestEnv {
         // This is safe because `env` outlives both clients.
         let token: TokenClient<'static> = unsafe { core::mem::transmute(token) };
         let token_sac: StellarAssetClient<'static> = unsafe { core::mem::transmute(token_sac) };
-        let client: LiquidityPoolContractClient<'static> =
-            unsafe { core::mem::transmute(client) };
+        let client: LiquidityPoolContractClient<'static> = unsafe { core::mem::transmute(client) };
 
         let admin = Address::generate(&env);
         let treasury = Address::generate(&env);
@@ -157,14 +156,16 @@ fn test_deposit_after_interest_increases_share_value() {
     // We inject interest by sending tokens to the pool and calling receive_repayment
     // with principal=0, interest=100.
     t.mint(&t.creditline, 100);
-    t.client
-        .receive_repayment(&t.creditline, &0, &100);
+    t.client.receive_repayment(&t.creditline, &0, &100);
 
     // Now total_liquidity includes the LP portion (85) of interest.
     // Pool: total_liquidity = 1000 + 85 = 1085, total_shares = 1000
     // Second deposit of 1000 tokens: shares = 1000 * 1000 / 1085 ≈ 921
     let shares_b = t.client.deposit(&provider_b, &1_000);
-    assert!(shares_b < 1_000, "Shares must be < 1000 since pool value grew");
+    assert!(
+        shares_b < 1_000,
+        "Shares must be < 1000 since pool value grew"
+    );
 
     // provider_a's shares are still 1000 but worth more
     assert_eq!(t.client.get_lp_shares(&provider_a), 1_000);
