@@ -19,5 +19,5 @@ pub enum CreditLineError {
     LoanNotOverdue = 12,
     InvalidRepaymentAmount = 13,
     UnauthorizedRepayer = 14,
-    LoanAlreadyRepaid = 15,
+    TokenNotConfigured = 15,
 }

@@ -1,4 +1,5 @@
 use crate::{CreditLineContract, CreditLineContractClient, LoanStatus, RepaymentInstallment};
+use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{
     contract, contractimpl,
     testutils::{Address as _, Events, Ledger},
@@ -20,6 +21,14 @@ impl MockReputation {
     }
 
     pub fn increase_score(_env: Env, _updater: Address, _user: Address, _amount: u32) {}
+}
+
+#[contract]
+pub struct MockLiquidityPool;
+
+#[contractimpl]
+impl MockLiquidityPool {
+    pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128) {}
 }
 
 // A mock reputation contract that always returns a score below the threshold.
@@ -48,6 +57,8 @@ struct TestCtx {
     client: CreditLineContractClient<'static>,
     admin: Address,
     rep_id: Address,
+    token_id: Address,
+    lp_id: Address,
 }
 
 impl TestCtx {
@@ -64,15 +75,21 @@ impl TestCtx {
         let admin = Address::generate(&env);
         let rep_id = env.register(MockReputation, ());
         let merchant_registry = Address::generate(&env);
-        let liquidity_pool = Address::generate(&env);
+        let lp_id = env.register(MockLiquidityPool, ());
 
-        client.initialize(&admin, &rep_id, &merchant_registry, &liquidity_pool);
+        let token_admin = Address::generate(&env);
+        let token_id = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        client.initialize(&admin, &rep_id, &merchant_registry, &lp_id, &token_id);
 
         TestCtx {
             env,
             client,
             admin,
             rep_id,
+            token_id,
+            lp_id,
         }
     }
 
@@ -99,6 +116,12 @@ impl TestCtx {
     fn advance_past(&self, due_date: u64) {
         self.env.ledger().set_timestamp(due_date + 1);
     }
+
+    /// Mint `amount` tokens to `address` so repayments don't fail on insufficient balance.
+    fn mint(&self, to: &Address, amount: i128) {
+        let asset_client = StellarAssetClient::new(&self.env, &self.token_id);
+        asset_client.mint(to, &amount);
+    }
 }
 
 #[test]
@@ -113,12 +136,14 @@ fn test_initialize() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     assert_eq!(client.get_admin(), admin);
@@ -137,12 +162,14 @@ fn test_initialize_twice_fails() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env); // add this
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Try to initialize again - should panic
@@ -151,6 +178,7 @@ fn test_initialize_twice_fails() {
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 }
 
@@ -173,12 +201,14 @@ fn test_get_loan_not_found() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Try to get a loan that doesn't exist
@@ -198,12 +228,14 @@ fn test_set_admin() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     assert_eq!(client.get_admin(), admin);
@@ -227,12 +259,14 @@ fn test_set_reputation_contract() {
     let new_reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Update reputation contract address
@@ -254,12 +288,14 @@ fn test_set_merchant_registry() {
     let merchant_registry = Address::generate(&env);
     let new_merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Update merchant registry address
@@ -281,12 +317,14 @@ fn test_set_liquidity_pool() {
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
     let new_liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Update liquidity pool address
@@ -312,12 +350,14 @@ fn test_create_loan_with_zero_total_amount() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -341,12 +381,14 @@ fn test_create_loan_with_negative_total_amount() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -370,12 +412,14 @@ fn test_create_loan_with_zero_guarantee_amount() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -399,12 +443,14 @@ fn test_create_loan_with_insufficient_guarantee_19_percent() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -428,12 +474,14 @@ fn test_create_loan_with_insufficient_guarantee_10_percent() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -483,12 +531,14 @@ fn test_loan_counter_increments() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Note: We can't actually create loans without a reputation contract
@@ -511,12 +561,14 @@ fn test_create_loan_with_one_less_than_minimum_guarantee() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -539,12 +591,14 @@ fn test_multiple_contract_address_updates() {
     let reputation_contract_3 = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract_1,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     // Update reputation contract multiple times
@@ -569,12 +623,14 @@ fn test_create_loan_with_positive_total_negative_guarantee() {
     let reputation_contract = Address::generate(&env);
     let merchant_registry = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &reputation_contract,
         &merchant_registry,
         &liquidity_pool,
+        &token,
     );
 
     let repayment_schedule = soroban_sdk::Vec::new(&env);
@@ -598,12 +654,14 @@ fn test_mark_defaulted_success() {
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &rep_id, // Pass the Mock ID
         &Address::generate(&env),
         &liquidity_pool,
+        &token,
     );
 
     // Set a baseline time
@@ -642,12 +700,14 @@ fn test_mark_defaulted_too_early_fails() {
 
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &rep_id,
         &Address::generate(&env),
         &Address::generate(&env),
+        &token,
     );
 
     let current_time = 10000;
@@ -782,12 +842,14 @@ fn test_create_loan_rejected_when_reputation_below_threshold() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
 
     client.initialize(
         &admin,
         &low_rep_id,
         &Address::generate(&env),
         &Address::generate(&env),
+        &token,
     );
 
     let mut schedule = soroban_sdk::Vec::new(&env);
@@ -1085,6 +1147,8 @@ fn test_partial_repayment_reduces_remaining_balance() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
+    t.mint(&user, 1000);
+
     t.client.repay_loan(&user, &loan_id, &500);
     let loan = t.client.get_loan(&loan_id);
     assert_eq!(loan.remaining_balance, 500);
@@ -1097,6 +1161,8 @@ fn test_full_repayment_sets_status_to_paid() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
+
+    t.mint(&user, 1000);
 
     t.client.repay_loan(&user, &loan_id, &1000);
     let loan = t.client.get_loan(&loan_id);
@@ -1351,6 +1417,8 @@ fn test_complete_lifecycle_create_repay_complete() {
 
     let loan_id = t.create_default_loan(&user, &merchant);
 
+    t.mint(&user, 1000);
+
     let active = t.client.get_loan(&loan_id);
     assert_eq!(active.status, LoanStatus::Active);
 
@@ -1370,6 +1438,8 @@ fn test_multi_contract_integration_full_flow() {
 
     // 1. Create loan — reputation validated, pool funded
     let loan_id = t.create_default_loan(&user, &merchant);
+
+    t.mint(&user, 1000);
 
     // 2. Repay in full — pool credited, reputation score increased
     t.client.repay_loan(&user, &loan_id, &1000);
@@ -1412,6 +1482,8 @@ fn test_repayment_on_already_paid_loan_is_rejected() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
+    t.mint(&user, 1002);
+
     // Pay in full first
     t.client.repay_loan(&user, &loan_id, &1000);
 
@@ -1448,6 +1520,8 @@ fn test_multiple_partial_repayments_accumulate_correctly() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
+    t.mint(&user, 1000);
+
     // Three partial payments: 300 + 300 + 400 = 1000
     t.client.repay_loan(&user, &loan_id, &300);
     t.client.repay_loan(&user, &loan_id, &300);
@@ -1466,6 +1540,8 @@ fn test_repay_loan_emits_event() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
+    t.mint(&user, 1000);
+
     t.client.repay_loan(&user, &loan_id, &500);
 
     let events = t.env.events().all();
@@ -1482,6 +1558,8 @@ fn test_partial_repayment_does_not_trigger_reputation_increase() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
+
+    t.mint(&user, 1000);
 
     t.client.repay_loan(&user, &loan_id, &500);
 

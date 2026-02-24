@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, symbol_short, Address, Env, IntoVal, Symbol, Vec,
+    contract, contractimpl, panic_with_error, symbol_short, token, Address, Env, IntoVal, Symbol,
+    Vec,
 };
 
 // Module imports
@@ -34,6 +35,7 @@ impl CreditLineContract {
         reputation_contract: Address,
         merchant_registry: Address,
         liquidity_pool: Address,
+        token: Address,
     ) {
         // Check if already initialized
         let admin_opt: Option<Address> = env.storage().instance().get(&storage::ADMIN_KEY);
@@ -47,6 +49,7 @@ impl CreditLineContract {
         storage::set_reputation_contract(&env, &reputation_contract);
         storage::set_merchant_registry(&env, &merchant_registry);
         storage::set_liquidity_pool(&env, &liquidity_pool);
+        storage::set_token(&env, &token);
     }
 
     /// Create a new loan
@@ -319,7 +322,7 @@ impl CreditLineContract {
             .checked_sub(amount)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
 
-        // 7. Update loan state
+        // 7. Prepare updated loan state
         loan.remaining_balance = new_balance;
 
         let is_fully_repaid = new_balance == 0;
@@ -327,9 +330,30 @@ impl CreditLineContract {
             loan.status = LoanStatus::Paid;
         }
 
+        // 8. Resolve external addresses before touching anything
+        let lp_address = storage::get_liquidity_pool(&env)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::InsufficientLiquidity));
+
+        let token_address = storage::get_token(&env)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::TokenNotConfigured));
+
+        // 9. Transfer tokens from borrower to liquidity pool
+        //    This must happen before state is committed — if it fails, nothing is persisted
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&borrower, &lp_address, &amount);
+
+        // 10. Notify pool — hard call so pool accounting stays in sync.
+        //     If this fails the whole transaction rolls back including the token transfer above.
+        env.invoke_contract::<()>(
+            &lp_address,
+            &Symbol::new(&env, "receive_repayment"),
+            (env.current_contract_address(), amount, 0i128).into_val(&env),
+        );
+
+        // 11. All external calls succeeded — now safe to commit state
         storage::write_loan(&env, &loan);
 
-        // 8. Emit event
+        // 12. Emit event
         events::emit_loan_repaid(
             &env,
             &borrower,
@@ -339,7 +363,7 @@ impl CreditLineContract {
             is_fully_repaid,
         );
 
-        // 9. Trigger reputation increase on full repayment
+        // 13. Reputation increase on full repayment — soft side-effect, failure is acceptable
         if is_fully_repaid {
             if let Some(reputation_contract) = storage::get_reputation_contract(&env) {
                 let updater = env.current_contract_address();
