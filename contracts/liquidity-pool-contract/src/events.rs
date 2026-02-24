@@ -8,12 +8,7 @@ const GUARANTEE_RCV: Symbol = symbol_short!("LQGUART");
 const INTEREST_DIST: Symbol = symbol_short!("LQINTDST");
 
 /// Emitted when a liquidity provider deposits tokens
-pub fn emit_liquidity_deposited(
-    env: &Env,
-    provider: &Address,
-    amount: i128,
-    shares_issued: i128,
-) {
+pub fn emit_liquidity_deposited(env: &Env, provider: &Address, amount: i128, shares_issued: i128) {
     env.events()
         .publish((DEPOSITED, provider), (amount, shares_issued));
 }
@@ -42,8 +37,7 @@ pub fn emit_repayment_received(env: &Env, creditline: &Address, principal: i128,
 
 /// Emitted when a forfeited guarantee is received on loan default
 pub fn emit_guarantee_received(env: &Env, creditline: &Address, amount: i128) {
-    env.events()
-        .publish((GUARANTEE_RCV, creditline), amount);
+    env.events().publish((GUARANTEE_RCV, creditline), amount);
 }
 
 /// Emitted when interest is distributed to LPs, treasury, and merchant fund

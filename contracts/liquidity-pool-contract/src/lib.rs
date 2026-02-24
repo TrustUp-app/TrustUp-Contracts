@@ -242,12 +242,7 @@ impl LiquidityPoolContract {
     ///
     /// `principal` reduces locked_liquidity (loan is repaid).
     /// `interest`  is distributed via `distribute_interest` (increases pool value).
-    pub fn receive_repayment(
-        env: Env,
-        creditline: Address,
-        principal: i128,
-        interest: i128,
-    ) {
+    pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128) {
         creditline.require_auth();
         Self::require_creditline(&env, &creditline);
 
@@ -276,11 +271,11 @@ impl LiquidityPoolContract {
         storage::set_locked_liquidity(&env, new_locked);
 
         // Principal returns to total_liquidity, then distribute interest
-        let total_liquidity = storage::get_total_liquidity(&env);
-        let after_principal = total_liquidity
-            .checked_add(principal)
-            .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow));
-        storage::set_total_liquidity(&env, after_principal);
+        // let total_liquidity = storage::get_total_liquidity(&env);
+        // let after_principal = total_liquidity
+        //     .checked_add(principal)
+        //     .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow));
+        // storage::set_total_liquidity(&env, after_principal);
 
         events::emit_repayment_received(&env, &creditline, principal, interest);
 
@@ -366,11 +361,7 @@ impl LiquidityPoolContract {
         // Transfer protocol fee to treasury (if configured)
         if protocol_amount > 0 {
             if let Some(treasury) = storage::get_treasury(env) {
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &treasury,
-                    &protocol_amount,
-                );
+                token_client.transfer(&env.current_contract_address(), &treasury, &protocol_amount);
             }
             // If treasury not configured, protocol fee stays in pool (benefits LPs)
         }
