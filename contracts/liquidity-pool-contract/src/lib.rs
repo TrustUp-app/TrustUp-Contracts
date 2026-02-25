@@ -3,6 +3,8 @@ use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env}
 
 mod errors;
 mod events;
+#[cfg(test)]
+mod liquidity_pool_tests;
 mod storage;
 mod types;
 

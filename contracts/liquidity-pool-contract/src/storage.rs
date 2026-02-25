@@ -70,7 +70,9 @@ pub fn get_merchant_fund(env: &Env) -> Option<Address> {
 }
 
 pub fn set_merchant_fund(env: &Env, merchant_fund: &Address) {
-    env.storage().instance().set(&MERCHANT_FUND_KEY, merchant_fund);
+    env.storage()
+        .instance()
+        .set(&MERCHANT_FUND_KEY, merchant_fund);
 }
 
 // --- Total Shares ---
@@ -86,7 +88,10 @@ pub fn set_total_shares(env: &Env, total: i128) {
 // --- Total Liquidity ---
 
 pub fn get_total_liquidity(env: &Env) -> i128 {
-    env.storage().instance().get(&TOTAL_LIQUIDITY_KEY).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&TOTAL_LIQUIDITY_KEY)
+        .unwrap_or(0)
 }
 
 pub fn set_total_liquidity(env: &Env, total: i128) {
