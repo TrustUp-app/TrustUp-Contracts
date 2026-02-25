@@ -5,6 +5,7 @@ use crate::types::RepaymentInstallment;
 // Event topics
 const LOAN_CREATED: Symbol = symbol_short!("LOANCRTD");
 const LOAN_DEFAULTED: Symbol = symbol_short!("LOANDFLT");
+const LOAN_REPAID: Symbol = symbol_short!("LOANRPD");
 
 /// Emit a loan created event
 pub fn emit_loan_created(
@@ -41,6 +42,25 @@ pub fn emit_loan_defaulted(
             total_amount,
             unpaid_balance,
             guarantee_forfeited,
+            env.ledger().timestamp(),
+        ),
+    );
+}
+
+pub fn emit_loan_repaid(
+    env: &Env,
+    borrower: &Address,
+    loan_id: u64,
+    amount_paid: i128,
+    remaining_balance: i128,
+    is_fully_repaid: bool,
+) {
+    env.events().publish(
+        (LOAN_REPAID, borrower, loan_id),
+        (
+            amount_paid,
+            remaining_balance,
+            is_fully_repaid,
             env.ledger().timestamp(),
         ),
     );

@@ -9,6 +9,7 @@ pub const LOANS_MAP: Symbol = symbol_short!("LOANS");
 pub const REPUTATION_CONTRACT: Symbol = symbol_short!("REPCONT");
 pub const MERCHANT_REGISTRY: Symbol = symbol_short!("MERCHANT");
 pub const LIQUIDITY_POOL: Symbol = symbol_short!("LIQPOOL");
+pub const TOKEN: Symbol = symbol_short!("TOKEN");
 
 /// Get the admin address from storage
 pub fn get_admin(env: &Env) -> Address {
@@ -87,4 +88,14 @@ pub fn get_liquidity_pool(env: &Env) -> Option<Address> {
 /// Set the Liquidity Pool Contract address
 pub fn set_liquidity_pool(env: &Env, address: &Address) {
     env.storage().instance().set(&LIQUIDITY_POOL, address);
+}
+
+/// Get the Token Contract address
+pub fn get_token(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&TOKEN)
+}
+
+/// Set the Token Contract address
+pub fn set_token(env: &Env, address: &Address) {
+    env.storage().instance().set(&TOKEN, address);
 }

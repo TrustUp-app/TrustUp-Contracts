@@ -336,10 +336,10 @@ fn test_receive_repayment_decreases_locked_and_distributes_interest() {
     let stats = t.client.get_pool_stats();
     assert_eq!(stats.locked_liquidity, 0);
 
-    // fund_loan does NOT reduce total_liquidity — it only moves tokens into locked.
+    // fund_loan does NOT reduce total_liquidity — only moves tokens into locked.
     // LP portion of interest = 85% of 40 = 34
-    // total_liquidity = 1000 (original) + 400 (principal back) + 34 (LP interest) = 1434
-    assert_eq!(stats.total_liquidity, 1_434);
+    // total_liquidity = 1000 (original) + 34 (LP interest) = 1034
+    assert_eq!(stats.total_liquidity, 1_034);
 }
 
 #[test]
@@ -372,6 +372,43 @@ fn test_receive_repayment_merchant_fund_receives_fee() {
     // Merchant fund gets 5% = 5
     let mf_balance = t.token.balance(&t.merchant_fund);
     assert_eq!(mf_balance, 5);
+}
+
+#[test]
+fn test_double_counting_does_not_compound_across_multiple_loan_cycles() {
+    // Regression test for the double-counting bug:
+    // After N fund_loan → receive_repayment cycles with zero interest,
+    // total_liquidity must remain exactly equal to the original deposit.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client.deposit(&provider, &1_000);
+
+    // Cycle 1
+    t.client.fund_loan(&t.creditline, &merchant, &600);
+    t.mint(&t.creditline, 600);
+    t.client.receive_repayment(&t.creditline, &600, &0);
+
+    assert_eq!(t.client.get_pool_stats().total_liquidity, 1_000);
+
+    // Cycle 2
+    t.client.fund_loan(&t.creditline, &merchant, &600);
+    t.mint(&t.creditline, 600);
+    t.client.receive_repayment(&t.creditline, &600, &0);
+
+    assert_eq!(t.client.get_pool_stats().total_liquidity, 1_000);
+
+    // Cycle 3
+    t.client.fund_loan(&t.creditline, &merchant, &600);
+    t.mint(&t.creditline, 600);
+    t.client.receive_repayment(&t.creditline, &600, &0);
+
+    assert_eq!(t.client.get_pool_stats().total_liquidity, 1_000);
+
+    // Provider must be able to withdraw their full original deposit
+    let returned = t.client.withdraw(&provider, &1_000);
+    assert_eq!(returned, 1_000);
 }
 
 // ─── distribute_interest (SC-17 core) ────────────────────────────────────────
@@ -670,13 +707,13 @@ fn test_withdraw_succeeds_after_loan_repayment_unlocks_liquidity() {
     assert_eq!(stats_after.locked_liquidity, 0);
     assert_eq!(stats_after.available_liquidity, stats_after.total_liquidity);
 
-    // After the fund_loan → receive_repayment cycle:
-    //   total_liquidity = 1000 (original) + 600 (principal returned) = 1600
+    // After the fund_loan → receive_repayment cycle with no interest:
+    //   total_liquidity = 1000 (unchanged — fund_loan never decreases it,
+    //                           and receive_repayment no longer adds principal back)
     //   total_shares    = 1000
-    // Withdrawing 600 shares: 600 * 1600 / 1000 = 960 tokens.
-    // This succeeds because available_liquidity (1600) >= 960.
+    // Withdrawing 600 shares: 600 * 1000 / 1000 = 600 tokens.
     let returned = t.client.withdraw(&provider, &600);
-    assert_eq!(returned, 960);
+    assert_eq!(returned, 600);
     assert_eq!(t.client.get_lp_shares(&provider), 400);
 }
 

@@ -244,7 +244,6 @@ pub fn repay_loan(
 - Loan not found scenarios
 
 **Known Limitations:**
-- ⚠️ Calls reputation contract's `slash` method which doesn't exist (should call `decrease_score`)
 - ⚠️ Token transfer to liquidity pool stubbed (Phase 6 dependency)
 
 ---
@@ -285,38 +284,22 @@ Bidirectional integration between credit behavior and reputation scores.
 
 ---
 
-### SC-12: Decrease reputation on default ⚠️
+### SC-12: Decrease reputation on default ✅
 
-**Status:** INCOMPLETE
+**Status:** Completed
 **Files:**
-- [lib.rs:263-272](../contracts/creditline-contract/src/lib.rs#L263-L272)
+- [lib.rs:263-280](../contracts/creditline-contract/src/lib.rs#L263-L280)
 
-**Current Implementation:**
-- ⚠️ Calls `reputation_contract.slash()` which **does not exist**
-- ⚠️ Should call `decrease_score()` instead
-- ⚠️ No explicit reason/amount passed
+**Implementation:**
+- ✅ Calls `decrease_score()` on reputation contract
+- ✅ Calculates penalty amount (20-30 points) based on loan size
+- ✅ Uses `try_invoke_contract` for safe error handling
+- ✅ Correctly passes `updater`, `user`, and `amount` parameters
 
-**Required Fixes:**
-```rust
-// Current (INCORRECT):
-env.invoke_contract::<()>(
-    &reputation_contract,
-    &symbol_short!("slash"),
-    (loan.borrower,).into_val(&env)
-);
-
-// Should be:
-env.invoke_contract::<()>(
-    &reputation_contract,
-    &symbol_short!("decrease_score"),
-    (creditline_updater, loan.borrower, penalty_amount).into_val(&env)
-);
-```
-
-**Tests Needed:**
-- Score decrease on default
-- Correct penalty amount calculation
-- Event verification for score change
+**Tests:**
+- ✅ Score decrease on default (tested via MockReputation)
+- ✅ Verified correct parameter passing
+- ✅ Error handling logic verified
 
 ---
 
@@ -514,15 +497,15 @@ Comprehensive test coverage for all contracts.
 | Phase 1: Access Control | ✅ Complete | 3/3 | 3 | 100% |
 | Phase 2: Reputation | ✅ Complete | 4/4 | 4 | 100% |
 | Phase 3: CreditLine Core | ⚠️ Partial | 2/3 | 3 | 67% |
-| Phase 4: Integration | ⚠️ Partial | 0/2 | 2 | 0% |
+| Phase 4: Integration | ⚠️ Partial | 1/2 | 2 | 50% |
 | Phase 5: Merchant Registry | ⏳ Pending | 0/2 | 2 | 0% |
 | Phase 6: Liquidity Pool | ⏳ Pending | 0/3 | 3 | 0% |
 | Phase 7: Testing | ⚠️ Partial | 1/3 | 3 | 33% |
 
 ### By Status
 
-- ✅ **Completed:** 11 issues
-- ⚠️ **Incomplete/Partial:** 4 issues
+- ✅ **Completed:** 12 issues
+- ⚠️ **Incomplete/Partial:** 3 issues
 - ❌ **Not Started:** 5 issues
 
 ---
@@ -541,15 +524,7 @@ Comprehensive test coverage for all contracts.
 
 ---
 
-### 2. SC-12: Fix reputation decrease on default ⚠️
-
-**Impact:** MEDIUM
-**Current Issue:** Calls non-existent `slash()` method instead of `decrease_score()`
-**Effort:** Low (1-2 hours)
-
----
-
-### 3. SC-13, SC-14: Merchant Registry ❌
+### 2. SC-13, SC-14: Merchant Registry ❌
 
 **Impact:** MEDIUM
 **Current Workaround:** Validation bypassed in CreditLine

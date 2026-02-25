@@ -273,11 +273,11 @@ impl LiquidityPoolContract {
         storage::set_locked_liquidity(&env, new_locked);
 
         // Principal returns to total_liquidity, then distribute interest
-        let total_liquidity = storage::get_total_liquidity(&env);
-        let after_principal = total_liquidity
-            .checked_add(principal)
-            .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow));
-        storage::set_total_liquidity(&env, after_principal);
+        // let total_liquidity = storage::get_total_liquidity(&env);
+        // let after_principal = total_liquidity
+        //     .checked_add(principal)
+        //     .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow));
+        // storage::set_total_liquidity(&env, after_principal);
 
         events::emit_repayment_received(&env, &creditline, principal, interest);
 
