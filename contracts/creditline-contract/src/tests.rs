@@ -1,9 +1,10 @@
 use crate::{CreditLineContract, CreditLineContractClient, LoanStatus, RepaymentInstallment};
+use merchant_registry_contract::MerchantRegistryContract;
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{
     contract, contractimpl,
     testutils::{Address as _, Events, Ledger},
-    Address, Env,
+    Address, Env, String as SorobanString,
 };
 
 // NOTE: Integration tests with reputation contract are skipped for now
@@ -59,6 +60,7 @@ struct TestCtx {
     rep_id: Address,
     token_id: Address,
     lp_id: Address,
+    merchant_registry_id: Address,
 }
 
 impl TestCtx {
@@ -74,14 +76,25 @@ impl TestCtx {
 
         let admin = Address::generate(&env);
         let rep_id = env.register(MockReputation, ());
-        let merchant_registry = Address::generate(&env);
+
+        // Register the actual MerchantRegistryContract
+        let merchant_registry_id = env.register(MerchantRegistryContract, ());
+
+        // Initialize the merchant registry using invoke_contract
+        use soroban_sdk::{IntoVal, Symbol};
+        let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+            &merchant_registry_id,
+            &Symbol::new(&env, "initialize"),
+            (&admin,).into_val(&env),
+        );
+
         let lp_id = env.register(MockLiquidityPool, ());
 
         let token_admin = Address::generate(&env);
         let token_id = env
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
-        client.initialize(&admin, &rep_id, &merchant_registry, &lp_id, &token_id);
+        client.initialize(&admin, &rep_id, &merchant_registry_id, &lp_id, &token_id);
 
         TestCtx {
             env,
@@ -90,6 +103,7 @@ impl TestCtx {
             rep_id,
             token_id,
             lp_id,
+            merchant_registry_id,
         }
     }
 
@@ -104,8 +118,26 @@ impl TestCtx {
         schedule
     }
 
+    /// Register a merchant in the merchant registry (idempotent - won't fail if already registered)
+    fn register_merchant(&self, merchant: &Address, name: &str) {
+        use soroban_sdk::{IntoVal, Symbol};
+        let merchant_name = SorobanString::from_str(&self.env, name);
+
+        // Use try_invoke_contract to handle errors gracefully
+        // Silently ignore errors - in tests, we want this to be idempotent
+        let _ = self.env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &self.merchant_registry_id,
+            &Symbol::new(&self.env, "register_merchant"),
+            (&self.admin, merchant, merchant_name).into_val(&self.env),
+        );
+    }
+
     /// Create a loan with sensible defaults: total=1000, guarantee=200, 1 installment.
+    /// Automatically registers the merchant if not already registered.
     fn create_default_loan(&self, user: &Address, merchant: &Address) -> u64 {
+        // Register the merchant first (idempotent - won't fail if already registered)
+        self.register_merchant(merchant, "Test Merchant");
+
         let due_date = self.env.ledger().timestamp() + 10_000;
         let schedule = self.single_installment(1000, due_date);
         self.client
@@ -650,16 +682,35 @@ fn test_mark_defaulted_success() {
     // Register our Mock Reputation contract
     let rep_id = env.register(MockReputation, ());
 
+    // Register the actual MerchantRegistryContract
+    let merchant_registry_id = env.register(MerchantRegistryContract, ());
+
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
     let liquidity_pool = Address::generate(&env);
     let token = Address::generate(&env);
 
+    // Initialize the merchant registry
+    use soroban_sdk::{IntoVal, Symbol};
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "initialize"),
+        (&admin,).into_val(&env),
+    );
+
+    // Register the merchant
+    let merchant_name = SorobanString::from_str(&env, "Test Merchant");
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "register_merchant"),
+        (&admin, &merchant, merchant_name).into_val(&env),
+    );
+
     client.initialize(
         &admin,
         &rep_id, // Pass the Mock ID
-        &Address::generate(&env),
+        &merchant_registry_id,
         &liquidity_pool,
         &token,
     );
@@ -698,14 +749,34 @@ fn test_mark_defaulted_too_early_fails() {
 
     let rep_id = env.register(MockReputation, ());
 
+    // Register the actual MerchantRegistryContract
+    let merchant_registry_id = env.register(MerchantRegistryContract, ());
+
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
+    let merchant = Address::generate(&env);
     let token = Address::generate(&env);
+
+    // Initialize the merchant registry
+    use soroban_sdk::{IntoVal, Symbol};
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "initialize"),
+        (&admin,).into_val(&env),
+    );
+
+    // Register the merchant
+    let merchant_name = SorobanString::from_str(&env, "Test Merchant");
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "register_merchant"),
+        (&admin, &merchant, merchant_name).into_val(&env),
+    );
 
     client.initialize(
         &admin,
         &rep_id,
-        &Address::generate(&env),
+        &merchant_registry_id,
         &Address::generate(&env),
         &token,
     );
@@ -719,7 +790,7 @@ fn test_mark_defaulted_too_early_fails() {
         due_date: 20000,
     });
 
-    let loan_id = client.create_loan(&user, &Address::generate(&env), &1000, &200, &schedule);
+    let loan_id = client.create_loan(&user, &merchant, &1000, &200, &schedule);
 
     // This should fail because 10000 < 20000
     client.mark_defaulted(&loan_id);
@@ -733,6 +804,7 @@ fn test_create_loan_returns_incrementing_ids() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    // create_default_loan registers the merchant on first call
     let id1 = t.create_default_loan(&user, &merchant);
     let id2 = t.create_default_loan(&user, &merchant);
     let id3 = t.create_default_loan(&user, &merchant);
@@ -747,6 +819,7 @@ fn test_create_loan_stores_correct_fields() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(5000);
     let due_date = 15000_u64;
@@ -773,6 +846,7 @@ fn test_create_loan_exactly_20_percent_guarantee() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
     let schedule = t.single_installment(1000, 99999);
 
     let loan_id = t
@@ -788,6 +862,7 @@ fn test_create_loan_with_more_than_20_percent_guarantee() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
     let schedule = t.single_installment(1000, 99999);
 
     let loan_id = t
@@ -802,6 +877,7 @@ fn test_create_loan_with_multi_installment_schedule() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     let mut schedule = soroban_sdk::Vec::new(&t.env);
     schedule.push_back(RepaymentInstallment {
@@ -839,15 +915,35 @@ fn test_create_loan_rejected_when_reputation_below_threshold() {
 
     // Wire in the low-score mock
     let low_rep_id = env.register(MockReputationLow, ());
+
+    // Register the actual MerchantRegistryContract
+    let merchant_registry_id = env.register(MerchantRegistryContract, ());
+
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
     let token = Address::generate(&env);
 
+    // Initialize the merchant registry
+    use soroban_sdk::{IntoVal, Symbol};
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "initialize"),
+        (&admin,).into_val(&env),
+    );
+
+    // Register the merchant
+    let merchant_name = SorobanString::from_str(&env, "Test Merchant");
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "register_merchant"),
+        (&admin, &merchant, merchant_name).into_val(&env),
+    );
+
     client.initialize(
         &admin,
         &low_rep_id,
-        &Address::generate(&env),
+        &merchant_registry_id,
         &Address::generate(&env),
         &token,
     );
@@ -896,6 +992,7 @@ fn test_mark_defaulted_emits_loan_defaulted_event() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -921,6 +1018,7 @@ fn test_mark_defaulted_on_already_defaulted_loan_fails() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -947,6 +1045,7 @@ fn test_default_flow_loan_status_becomes_defaulted() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -969,6 +1068,7 @@ fn test_default_flow_preserves_loan_amounts() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -991,6 +1091,7 @@ fn test_mark_defaulted_at_exactly_due_date_boundary() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let due_date = 5000_u64;
@@ -1011,6 +1112,7 @@ fn test_mark_defaulted_one_second_past_due_succeeds() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let due_date = 5000_u64;
@@ -1032,6 +1134,7 @@ fn test_default_flow_uses_last_installment_for_overdue_check() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
 
@@ -1077,6 +1180,7 @@ fn test_mark_defaulted_triggers_reputation_slash() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -1203,6 +1307,7 @@ fn test_repayment_on_non_active_loan_is_rejected() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -1252,41 +1357,64 @@ fn test_early_repayment_triggers_bonus_reputation_increase() {
     let _ = loan_id;
 }
 
-// ─── merchant validation — TDD stubs (Phase 5) ───────────────────────────────
+// ─── merchant validation ─────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "merchant registry integration not yet implemented — Phase 5"]
 fn test_active_merchant_can_receive_loan() {
-    // When merchant registry is live, an approved merchant must pass validation
+    // An approved and active merchant must pass validation
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let active_merchant = Address::generate(&t.env);
-    // TODO: wire up a MockMerchantRegistry that returns is_active=true for active_merchant
-    let _ = t.create_default_loan(&user, &active_merchant);
+
+    // create_default_loan already registers the merchant
+    let loan_id = t.create_default_loan(&user, &active_merchant);
+    assert!(loan_id > 0);
 }
 
 #[test]
-#[ignore = "merchant registry integration not yet implemented — Phase 5"]
-#[should_panic(expected = "Error(Contract, #3)")] // MerchantNotActive
+#[should_panic(expected = "Error(Contract, #3)")] // InvalidMerchant
 fn test_inactive_merchant_loan_is_rejected() {
     // A merchant that is registered but set to inactive must fail
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let inactive_merchant = Address::generate(&t.env);
-    // TODO: wire up a MockMerchantRegistry that returns is_active=false for inactive_merchant
+
+    // Register the merchant first using invoke_contract
+    use soroban_sdk::{IntoVal, Symbol};
+    let merchant_name = SorobanString::from_str(&t.env, "Inactive Merchant");
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = t.env.invoke_contract(
+        &t.merchant_registry_id,
+        &Symbol::new(&t.env, "register_merchant"),
+        (&t.admin, &inactive_merchant, merchant_name).into_val(&t.env),
+    );
+
+    // Then deactivate the merchant
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = t.env.invoke_contract(
+        &t.merchant_registry_id,
+        &Symbol::new(&t.env, "deactivate_merchant"),
+        (&t.admin, &inactive_merchant).into_val(&t.env),
+    );
+
+    // This should panic with InvalidMerchant error
     let _ = t.create_default_loan(&user, &inactive_merchant);
 }
 
 #[test]
-#[ignore = "merchant registry integration not yet implemented — Phase 5"]
-#[should_panic(expected = "Error(Contract, #3)")] // MerchantNotActive
+#[should_panic(expected = "Error(Contract, #3)")] // InvalidMerchant
 fn test_unregistered_merchant_loan_is_rejected() {
     // A merchant address unknown to the registry must fail
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let unknown_merchant = Address::generate(&t.env);
-    // TODO: wire up a MockMerchantRegistry that returns None for unknown_merchant
-    let _ = t.create_default_loan(&user, &unknown_merchant);
+
+    // Don't register the merchant - call create_loan directly instead of create_default_loan
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(1000, due_date);
+
+    // This should panic with InvalidMerchant error
+    let _ = t
+        .client
+        .create_loan(&user, &unknown_merchant, &1000, &200, &schedule);
 }
 
 // ─── liquidity pool integration — TDD stubs (Phase 6) ────────────────────────
@@ -1355,6 +1483,7 @@ fn test_complete_lifecycle_create_then_default() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
@@ -1383,6 +1512,7 @@ fn test_multiple_independent_loans_do_not_interfere() {
     let user_a = Address::generate(&t.env);
     let user_b = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
 
@@ -1460,6 +1590,7 @@ fn test_repayment_on_defaulted_loan_is_rejected() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);

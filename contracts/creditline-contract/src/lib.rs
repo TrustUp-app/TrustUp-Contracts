@@ -162,21 +162,22 @@ impl CreditLineContract {
     }
 
     /// Validate merchant is registered and active
-    /// TODO: Implement when Merchant Registry contract is available (Phase 5)
     fn validate_merchant(env: &Env, merchant: &Address) {
-        let merchant_registry = storage::get_merchant_registry(env);
+        let merchant_registry = storage::get_merchant_registry(env)
+            .unwrap_or_else(|| panic_with_error!(env, CreditLineError::InvalidMerchant));
 
-        if merchant_registry.is_none() {
-            // Merchant registry not configured yet
-            // For now, we'll skip this validation
-            // TODO: Remove this when merchant registry is implemented
-            return;
+        // Call the merchant registry contract to check if merchant is active
+        use soroban_sdk::IntoVal;
+
+        let is_active: bool = env.invoke_contract(
+            &merchant_registry,
+            &symbol_short!("is_active"),
+            (merchant,).into_val(env),
+        );
+
+        if !is_active {
+            panic_with_error!(env, CreditLineError::MerchantNotActive);
         }
-
-        // TODO: Query merchant registry contract
-        // Example: merchant_registry_client.is_active(merchant)
-        // For now, we assume merchant is valid
-        let _ = merchant;
     }
 
     /// Validate user has sufficient reputation

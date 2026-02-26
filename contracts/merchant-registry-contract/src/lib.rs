@@ -13,6 +13,9 @@ use errors::Error;
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 use types::MerchantInfo;
 
+// Export Error type for external use
+pub use errors::Error as MerchantRegistryError;
+
 #[contract]
 pub struct MerchantRegistryContract;
 
