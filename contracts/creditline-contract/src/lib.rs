@@ -176,7 +176,7 @@ impl CreditLineContract {
         );
 
         if !is_active {
-            panic_with_error!(env, CreditLineError::InvalidMerchant);
+            panic_with_error!(env, CreditLineError::MerchantNotActive);
         }
     }
 
