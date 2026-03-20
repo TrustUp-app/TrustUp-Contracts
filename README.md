@@ -322,25 +322,25 @@ See [ROADMAP.md](./docs/ROADMAP.md) for detailed breakdown.
 <tr>
 
 <td align="center">
-  <a href="https://github.com/Yusufolosun">
-    <img src="https://avatars.githubusercontent.com/u/175801072?v=4" width="100px;" style="border-radius:50%;" alt="Yusufolosun"/><br />
-    <sub><b>🥇 @Yusufolosun</b></sub><br />
-    <sub>8 contributions</sub>
-  </a>
-</td>
-
-<td align="center">
   <a href="https://github.com/KevinMB0220">
     <img src="https://avatars.githubusercontent.com/u/130603817?v=4" width="100px;" style="border-radius:50%;" alt="KevinMB0220"/><br />
-    <sub><b>🥈 @KevinMB0220</b></sub><br />
+    <sub><b>🥇 @KevinMB0220</b></sub><br />
     <sub>6 contributions</sub>
   </a>
 </td>
 
 <td align="center">
-  <a href="https://github.com/Benalex8797">
-    <img src="https://avatars.githubusercontent.com/u/198606778?v=4" width="100px;" style="border-radius:50%;" alt="Benalex8797"/><br />
-    <sub><b>🥉 @Benalex8797</b></sub><br />
+  <a href="https://github.com/Birdmannn">
+    <img src="https://avatars.githubusercontent.com/u/95439583?v=4" width="100px;" style="border-radius:50%;" alt="Birdmannn"/><br />
+    <sub><b>🥈 @Birdmannn</b></sub><br />
+    <sub>5 contributions</sub>
+  </a>
+</td>
+
+<td align="center">
+  <a href="https://github.com/davedumto">
+    <img src="https://avatars.githubusercontent.com/u/112870446?v=4" width="100px;" style="border-radius:50%;" alt="davedumto"/><br />
+    <sub><b>🥉 @davedumto</b></sub><br />
     <sub>5 contributions</sub>
   </a>
 </td>
