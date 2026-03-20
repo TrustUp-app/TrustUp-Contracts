@@ -1,0 +1,58 @@
+name: Update Leaderboard
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # everyday
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-leaderboard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      
+      - name: Debug FULL structure
+        run: |
+          echo "📁 CURRENT DIR:"
+          pwd
+
+          echo "📁 ROOT:"
+          ls -la
+
+          echo "📁 FIND SCRIPT:"
+          find . -name "generate-leaderboard.js"
+
+    
+      - name: Run script (auto-detect path)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FILE=$(find . -name "generate-leaderboard.js" | head -n 1)
+
+          echo "📄 Found script at: $FILE"
+
+          if [ -z "$FILE" ]; then
+            echo "❌ Script not found"
+            exit 1
+          fi
+
+          node $FILE
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add README.md
+          git commit -m "update leaderboard" || echo "No changes"
+          git push
