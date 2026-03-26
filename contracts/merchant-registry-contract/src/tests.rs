@@ -109,3 +109,29 @@ fn test_activation_and_deactivation() {
     assert!(client.is_active(&merchant));
     assert_eq!(client.get_merchant_info(&merchant).active, true);
 }
+
+#[test]
+fn test_set_merchant_status() {
+    let env = Env::default();
+    let (client, admin, merchant) = setup(&env);
+    env.mock_all_auths();
+
+    let name = String::from_str(&env, "Quasar Goods");
+    client.register_merchant(&admin, &merchant, &name);
+
+    // Merchant starts active
+    assert!(client.is_active(&merchant));
+
+    // Deactivate via set_merchant_status
+    client.set_merchant_status(&admin, &merchant, &false);
+    assert!(!client.is_active(&merchant));
+
+    // Reactivate via set_merchant_status
+    client.set_merchant_status(&admin, &merchant, &true);
+    assert!(client.is_active(&merchant));
+
+    // Non-admin must be rejected
+    let fake_admin = Address::generate(&env);
+    let res = client.try_set_merchant_status(&fake_admin, &merchant, &false);
+    assert!(res.is_err());
+}
