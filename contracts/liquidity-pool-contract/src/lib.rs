@@ -208,6 +208,7 @@ impl LiquidityPoolContract {
     /// Transfer `amount` tokens to `merchant` to fund a loan.
     /// Only the registered CreditLine contract may call this.
     pub fn fund_loan(env: Env, creditline: Address, merchant: Address, amount: i128) {
+        creditline.require_auth();
         Self::require_creditline(&env, &creditline);
 
         if amount <= 0 {
@@ -242,6 +243,7 @@ impl LiquidityPoolContract {
     /// `principal` reduces locked_liquidity (loan is repaid).
     /// `interest`  is distributed via `distribute_interest` (increases pool value).
     pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128) {
+        creditline.require_auth();
         Self::require_creditline(&env, &creditline);
 
         if principal < 0 || interest < 0 {
@@ -286,6 +288,7 @@ impl LiquidityPoolContract {
     /// The amount offsets the loss: it is added back to total_liquidity
     /// and reduces locked_liquidity by the same amount (partial recovery).
     pub fn receive_guarantee(env: Env, creditline: Address, amount: i128) {
+        creditline.require_auth();
         Self::require_creditline(&env, &creditline);
 
         if amount <= 0 {
