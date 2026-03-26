@@ -100,6 +100,29 @@ impl MerchantRegistryContract {
         Ok(())
     }
 
+    /// Sets a merchant's active status (admin only).
+    /// Pass `active = true` to activate, `active = false` to deactivate.
+    pub fn set_merchant_status(
+        env: Env,
+        admin: Address,
+        merchant: Address,
+        active: bool,
+    ) -> Result<(), Error> {
+        if !storage::has_admin(&env) {
+            return Err(Error::NotInitialized);
+        }
+
+        access::require_admin(&env, &admin)?;
+
+        let mut info = storage::get_merchant(&env, &merchant).ok_or(Error::MerchantNotFound)?;
+
+        info.active = active;
+        storage::set_merchant(&env, &merchant, &info);
+        events::publish_merchant_status(&env, merchant, active);
+
+        Ok(())
+    }
+
     pub fn is_active(env: Env, merchant: Address) -> bool {
         if let Some(info) = storage::get_merchant(&env, &merchant) {
             info.active
