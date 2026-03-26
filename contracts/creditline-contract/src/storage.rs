@@ -1,15 +1,24 @@
-use soroban_sdk::{symbol_short, Address, Env, Map, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 use crate::types::Loan;
 
 // Storage keys
 pub const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 pub const LOAN_COUNTER: Symbol = symbol_short!("LOANCNT");
-pub const LOANS_MAP: Symbol = symbol_short!("LOANS");
 pub const REPUTATION_CONTRACT: Symbol = symbol_short!("REPCONT");
 pub const MERCHANT_REGISTRY: Symbol = symbol_short!("MERCHANT");
 pub const LIQUIDITY_POOL: Symbol = symbol_short!("LIQPOOL");
 pub const TOKEN: Symbol = symbol_short!("TOKEN");
+
+const LOAN_SHARD_COUNT: u32 = 32;
+
+#[contracttype]
+#[derive(Clone)]
+enum DataKey {
+    Loan(u32, u64),
+    UserLoanCount(Address),
+    UserLoanAt(Address, u64),
+}
 
 /// Get the admin address from storage
 pub fn get_admin(env: &Env) -> Address {
@@ -39,25 +48,76 @@ pub fn increment_loan_counter(env: &Env) -> u64 {
 
 /// Read a loan from storage
 pub fn read_loan(env: &Env, loan_id: u64) -> Option<Loan> {
-    let loans: Map<u64, Loan> = env
-        .storage()
-        .instance()
-        .get(&LOANS_MAP)
-        .unwrap_or_else(|| Map::new(env));
-
-    loans.get(loan_id)
+    let shard = loan_shard(loan_id);
+    env.storage().persistent().get(&DataKey::Loan(shard, loan_id))
 }
 
 /// Write a loan to storage
 pub fn write_loan(env: &Env, loan: &Loan) {
-    let mut loans: Map<u64, Loan> = env
-        .storage()
-        .instance()
-        .get(&LOANS_MAP)
-        .unwrap_or_else(|| Map::new(env));
+    let shard = loan_shard(loan.loan_id);
+    let key = DataKey::Loan(shard, loan.loan_id);
+    let is_new = !env.storage().persistent().has(&key);
+    env.storage().persistent().set(&key, loan);
 
-    loans.set(loan.loan_id, loan.clone());
-    env.storage().instance().set(&LOANS_MAP, &loans);
+    if is_new {
+        append_user_loan_index(env, &loan.borrower, loan.loan_id);
+    }
+}
+
+pub fn get_user_loan_count(env: &Env, borrower: &Address) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::UserLoanCount(borrower.clone()))
+        .unwrap_or(0)
+}
+
+pub fn get_user_loan_ids_paginated(env: &Env, borrower: &Address, start: u64, limit: u32) -> Vec<u64> {
+    let total = get_user_loan_count(env, borrower);
+    let mut result = Vec::new(env);
+
+    if limit == 0 || start >= total {
+        return result;
+    }
+
+    let end = start.saturating_add(limit as u64).min(total);
+    let mut idx = start;
+    while idx < end {
+        let key = DataKey::UserLoanAt(borrower.clone(), idx);
+        if let Some(loan_id) = env.storage().persistent().get::<DataKey, u64>(&key) {
+            result.push_back(loan_id);
+        }
+        idx += 1;
+    }
+
+    result
+}
+
+pub fn get_user_loans_paginated(env: &Env, borrower: &Address, start: u64, limit: u32) -> Vec<Loan> {
+    let loan_ids = get_user_loan_ids_paginated(env, borrower, start, limit);
+    let mut loans = Vec::new(env);
+
+    for loan_id in loan_ids.iter() {
+        if let Some(loan) = read_loan(env, loan_id) {
+            loans.push_back(loan);
+        }
+    }
+
+    loans
+}
+
+fn append_user_loan_index(env: &Env, borrower: &Address, loan_id: u64) {
+    let count = get_user_loan_count(env, borrower);
+    env.storage().persistent().set(
+        &DataKey::UserLoanAt(borrower.clone(), count),
+        &loan_id,
+    );
+    env.storage()
+        .persistent()
+        .set(&DataKey::UserLoanCount(borrower.clone()), &(count + 1));
+}
+
+fn loan_shard(loan_id: u64) -> u32 {
+    (loan_id % (LOAN_SHARD_COUNT as u64)) as u32
 }
 
 /// Get the Reputation Contract address

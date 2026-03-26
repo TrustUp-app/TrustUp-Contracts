@@ -21,4 +21,5 @@ pub enum CreditLineError {
     UnauthorizedRepayer = 14,
     TokenNotConfigured = 15,
     InvalidMerchant = 16,
+    MerchantValidationFailed = 17,
 }

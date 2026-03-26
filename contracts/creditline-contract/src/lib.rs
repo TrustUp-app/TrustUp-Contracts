@@ -3,6 +3,8 @@ use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, token, Address, Env, IntoVal, Symbol,
     Vec,
 };
+use liquidity_pool_contract::LiquidityPoolContractClient;
+use merchant_registry_contract::MerchantRegistryContractClient;
 
 // Module imports
 mod access;
@@ -87,6 +89,12 @@ impl CreditLineContract {
             created_at: env.ledger().timestamp(),
         };
 
+        let pool_contribution = total_amount
+            .checked_sub(guarantee_amount)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
+
+        Self::fund_loan_from_pool(&env, &user, &merchant, guarantee_amount, pool_contribution);
+
         storage::write_loan(&env, &loan);
 
         events::emit_loan_created(
@@ -100,6 +108,15 @@ impl CreditLineContract {
         );
 
         loan_id
+    }
+
+    /// Paginated borrower loan history for scalable reads.
+    pub fn get_user_loans(env: Env, borrower: Address, start: u64, limit: u32) -> Vec<Loan> {
+        storage::get_user_loans_paginated(&env, &borrower, start, limit)
+    }
+
+    pub fn get_user_loan_count(env: Env, borrower: Address) -> u64 {
+        storage::get_user_loan_count(&env, &borrower)
     }
 
     /// Get a loan by ID
@@ -150,6 +167,10 @@ impl CreditLineContract {
             panic_with_error!(env, CreditLineError::InvalidAmount);
         }
 
+        if guarantee_amount > total_amount {
+            panic_with_error!(env, CreditLineError::InvalidAmount);
+        }
+
         // Calculate minimum guarantee (20% of total)
         let min_guarantee = total_amount
             .checked_mul(types::MIN_GUARANTEE_PERCENT)
@@ -166,14 +187,15 @@ impl CreditLineContract {
         let merchant_registry = storage::get_merchant_registry(env)
             .unwrap_or_else(|| panic_with_error!(env, CreditLineError::InvalidMerchant));
 
-        // Call the merchant registry contract to check if merchant is active
-        use soroban_sdk::IntoVal;
-
-        let is_active: bool = env.invoke_contract(
-            &merchant_registry,
-            &symbol_short!("is_active"),
-            (merchant,).into_val(env),
-        );
+        let registry_client = MerchantRegistryContractClient::new(env, &merchant_registry);
+        let is_active = env
+            .try_invoke_contract::<bool, soroban_sdk::Error>(
+                &registry_client.address,
+                &symbol_short!("is_active"),
+                (merchant,).into_val(env),
+            )
+            .unwrap_or_else(|_| panic_with_error!(env, CreditLineError::MerchantValidationFailed))
+            .unwrap_or_else(|_| panic_with_error!(env, CreditLineError::MerchantValidationFailed));
 
         if !is_active {
             panic_with_error!(env, CreditLineError::MerchantNotActive);
@@ -200,27 +222,48 @@ impl CreditLineContract {
         }
     }
 
-    /// Validate liquidity pool has sufficient funds
-    /// TODO: Implement when Liquidity Pool contract is available (Phase 6)
     fn validate_liquidity(env: &Env, total_amount: i128, guarantee_amount: i128) {
-        let liquidity_pool = storage::get_liquidity_pool(env);
-
-        if liquidity_pool.is_none() {
-            // Liquidity pool not configured yet
-            // For now, we'll skip this validation
-            // TODO: Remove this when liquidity pool is implemented
-            return;
-        }
+        let liquidity_pool = storage::get_liquidity_pool(env)
+            .unwrap_or_else(|| panic_with_error!(env, CreditLineError::InsufficientLiquidity));
 
         // The loan requires (total_amount - guarantee_amount) from the pool
         let required_from_pool = total_amount
             .checked_sub(guarantee_amount)
             .unwrap_or_else(|| panic_with_error!(env, CreditLineError::Underflow));
 
-        // TODO: Query liquidity pool contract
-        // Example: liquidity_pool_client.get_available_liquidity()
-        // For now, we assume liquidity is sufficient
-        let _ = required_from_pool;
+        if required_from_pool == 0 {
+            return;
+        }
+
+        let lp_client = LiquidityPoolContractClient::new(env, &liquidity_pool);
+        let stats = lp_client.get_pool_stats();
+
+        if stats.available_liquidity < required_from_pool {
+            panic_with_error!(env, CreditLineError::InsufficientLiquidity);
+        }
+    }
+
+    fn fund_loan_from_pool(
+        env: &Env,
+        borrower: &Address,
+        merchant: &Address,
+        guarantee_amount: i128,
+        pool_contribution: i128,
+    ) {
+        let liquidity_pool = storage::get_liquidity_pool(env)
+            .unwrap_or_else(|| panic_with_error!(env, CreditLineError::InsufficientLiquidity));
+
+        let token_address = storage::get_token(env)
+            .unwrap_or_else(|| panic_with_error!(env, CreditLineError::TokenNotConfigured));
+
+        let token_client = token::Client::new(env, &token_address);
+        // Escrow borrower guarantee in CreditLine. It is forwarded to the pool only on default.
+        token_client.transfer(borrower, &env.current_contract_address(), &guarantee_amount);
+
+        if pool_contribution > 0 {
+            let lp_client = LiquidityPoolContractClient::new(env, &liquidity_pool);
+            lp_client.fund_loan(&env.current_contract_address(), merchant, &pool_contribution);
+        }
     }
 
     /// Calculate appropriate penalty amount (20-30 points based on loan size)
@@ -254,11 +297,15 @@ impl CreditLineContract {
         }
 
         // 4. Transfer guarantee to Liquidity Pool
-        let _lp_address =
+        let lp_address =
             storage::get_liquidity_pool(&env).ok_or(CreditLineError::InsufficientLiquidity)?;
+        let token_address = storage::get_token(&env).ok_or(CreditLineError::TokenNotConfigured)?;
 
-        // Note: In a real Soroban contract, you'd use a token client to move funds here.
-        // For Phase 3, we logic-gate the state change.
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&env.current_contract_address(), &lp_address, &loan.guarantee_amount);
+
+        let lp_client = LiquidityPoolContractClient::new(&env, &lp_address);
+        lp_client.receive_guarantee(&env.current_contract_address(), &loan.guarantee_amount);
 
         // 5. Update Status
         loan.status = LoanStatus::Defaulted;
@@ -345,11 +392,8 @@ impl CreditLineContract {
 
         // 10. Notify pool — hard call so pool accounting stays in sync.
         //     If this fails the whole transaction rolls back including the token transfer above.
-        env.invoke_contract::<()>(
-            &lp_address,
-            &Symbol::new(&env, "receive_repayment"),
-            (env.current_contract_address(), amount, 0i128).into_val(&env),
-        );
+        let lp_client = LiquidityPoolContractClient::new(&env, &lp_address);
+        lp_client.receive_repayment(&env.current_contract_address(), &amount, &0i128);
 
         // 11. All external calls succeeded — now safe to commit state
         storage::write_loan(&env, &loan);

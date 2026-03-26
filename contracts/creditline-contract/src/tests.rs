@@ -1,4 +1,5 @@
 use crate::{CreditLineContract, CreditLineContractClient, LoanStatus, RepaymentInstallment};
+use liquidity_pool_contract::PoolStats;
 use merchant_registry_contract::MerchantRegistryContract;
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{
@@ -29,7 +30,21 @@ pub struct MockLiquidityPool;
 
 #[contractimpl]
 impl MockLiquidityPool {
+    pub fn get_pool_stats(_env: Env) -> PoolStats {
+        PoolStats {
+            total_liquidity: 1_000_000,
+            locked_liquidity: 0,
+            available_liquidity: 1_000_000,
+            total_shares: 1_000_000,
+            share_price: 10_000,
+        }
+    }
+
+    pub fn fund_loan(_env: Env, _creditline: Address, _merchant: Address, _amount: i128) {}
+
     pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128) {}
+
+    pub fn receive_guarantee(_env: Env, _from: Address, _amount: i128) {}
 }
 
 // A mock reputation contract that always returns a score below the threshold.
@@ -137,6 +152,9 @@ impl TestCtx {
     fn create_default_loan(&self, user: &Address, merchant: &Address) -> u64 {
         // Register the merchant first (idempotent - won't fail if already registered)
         self.register_merchant(merchant, "Test Merchant");
+
+        // Guarantee transfer now happens at loan creation, so borrower needs balance.
+        self.mint(user, 200);
 
         let due_date = self.env.ledger().timestamp() + 10_000;
         let schedule = self.single_installment(1000, due_date);
@@ -688,8 +706,11 @@ fn test_mark_defaulted_success() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
-    let liquidity_pool = Address::generate(&env);
-    let token = Address::generate(&env);
+    let liquidity_pool = env.register(MockLiquidityPool, ());
+    let token_admin = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
 
     // Initialize the merchant registry
     use soroban_sdk::{IntoVal, Symbol};
@@ -725,6 +746,9 @@ fn test_mark_defaulted_success() {
         due_date: current_time + 1000, // Due at 11000
     });
 
+    let asset_client = StellarAssetClient::new(&env, &token);
+    asset_client.mint(&user, &200);
+
     // Create loan (calls MockReputation::get_score)
     let loan_id = client.create_loan(&user, &merchant, &1000, &200, &schedule);
 
@@ -755,7 +779,11 @@ fn test_mark_defaulted_too_early_fails() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     let merchant = Address::generate(&env);
-    let token = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let liquidity_pool = env.register(MockLiquidityPool, ());
 
     // Initialize the merchant registry
     use soroban_sdk::{IntoVal, Symbol};
@@ -777,7 +805,7 @@ fn test_mark_defaulted_too_early_fails() {
         &admin,
         &rep_id,
         &merchant_registry_id,
-        &Address::generate(&env),
+        &liquidity_pool,
         &token,
     );
 
@@ -789,6 +817,9 @@ fn test_mark_defaulted_too_early_fails() {
         amount: 1000,
         due_date: 20000,
     });
+
+    let asset_client = StellarAssetClient::new(&env, &token);
+    asset_client.mint(&user, &200);
 
     let loan_id = client.create_loan(&user, &merchant, &1000, &200, &schedule);
 
@@ -824,6 +855,7 @@ fn test_create_loan_stores_correct_fields() {
     t.env.ledger().set_timestamp(5000);
     let due_date = 15000_u64;
     let schedule = t.single_installment(1000, due_date);
+    t.mint(&user, 200);
 
     let loan_id = t
         .client
@@ -848,6 +880,7 @@ fn test_create_loan_exactly_20_percent_guarantee() {
     let merchant = Address::generate(&t.env);
     t.register_merchant(&merchant, "Test Merchant");
     let schedule = t.single_installment(1000, 99999);
+    t.mint(&user, 200);
 
     let loan_id = t
         .client
@@ -864,6 +897,7 @@ fn test_create_loan_with_more_than_20_percent_guarantee() {
     let merchant = Address::generate(&t.env);
     t.register_merchant(&merchant, "Test Merchant");
     let schedule = t.single_installment(1000, 99999);
+    t.mint(&user, 500);
 
     let loan_id = t
         .client
@@ -892,6 +926,7 @@ fn test_create_loan_with_multi_installment_schedule() {
         amount: 333,
         due_date: 30000,
     });
+    t.mint(&user, 200);
 
     let loan_id = t
         .client
@@ -996,6 +1031,7 @@ fn test_mark_defaulted_emits_loan_defaulted_event() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1022,6 +1058,7 @@ fn test_mark_defaulted_on_already_defaulted_loan_fails() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1049,6 +1086,7 @@ fn test_default_flow_loan_status_becomes_defaulted() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1072,6 +1110,7 @@ fn test_default_flow_preserves_loan_amounts() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1096,6 +1135,7 @@ fn test_mark_defaulted_at_exactly_due_date_boundary() {
     t.env.ledger().set_timestamp(1000);
     let due_date = 5000_u64;
     let schedule = t.single_installment(1000, due_date);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1117,6 +1157,7 @@ fn test_mark_defaulted_one_second_past_due_succeeds() {
     t.env.ledger().set_timestamp(1000);
     let due_date = 5000_u64;
     let schedule = t.single_installment(1000, due_date);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1151,6 +1192,7 @@ fn test_default_flow_uses_last_installment_for_overdue_check() {
         amount: 300,
         due_date: 10000,
     }); // last
+    t.mint(&user, 200);
 
     let loan_id = t
         .client
@@ -1184,6 +1226,7 @@ fn test_mark_defaulted_triggers_reputation_slash() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1311,6 +1354,7 @@ fn test_repayment_on_non_active_loan_is_rejected() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1487,6 +1531,7 @@ fn test_complete_lifecycle_create_then_default() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
@@ -1518,6 +1563,8 @@ fn test_multiple_independent_loans_do_not_interfere() {
 
     let schedule_a = t.single_installment(1000, 5000);
     let schedule_b = t.single_installment(2000, 8000);
+    t.mint(&user_a, 200);
+    t.mint(&user_b, 400);
 
     let loan_a = t
         .client
@@ -1594,6 +1641,7 @@ fn test_repayment_on_defaulted_loan_is_rejected() {
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
