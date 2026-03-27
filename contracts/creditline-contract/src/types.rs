@@ -4,9 +4,11 @@ use soroban_sdk::{contracttype, Address};
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LoanStatus {
+    Pending,
     Active,
     Paid,
     Defaulted,
+    Cancelled,
 }
 
 // Repayment installment structure
@@ -26,12 +28,21 @@ pub struct Loan {
     pub merchant: Address,
     pub total_amount: i128,
     pub guarantee_amount: i128,
+    pub interest_rate_bps: u32,
+    pub interest_amount: i128,
+    pub service_fee_amount: i128,
+    pub principal_outstanding: i128,
+    pub interest_outstanding: i128,
+    pub service_fee_outstanding: i128,
     pub remaining_balance: i128,
     pub repayment_schedule: soroban_sdk::Vec<RepaymentInstallment>,
     pub status: LoanStatus,
     pub created_at: u64, // Unix timestamp
+    pub funded_at: u64,  // 0 means not funded yet
 }
 
 // Constants
 pub const MIN_GUARANTEE_PERCENT: i128 = 20; // 20% minimum guarantee
 pub const MIN_REPUTATION_THRESHOLD: u32 = 50; // Minimum reputation score required
+pub const SERVICE_FEE_BPS: i128 = 100; // 1% flat service fee
+pub const BPS_DENOMINATOR: i128 = 10_000;

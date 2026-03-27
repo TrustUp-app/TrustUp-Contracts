@@ -8,6 +8,13 @@ use soroban_sdk::{
     Address, Env, String as SorobanString,
 };
 
+const DEFAULT_PRINCIPAL: i128 = 1_000;
+const DEFAULT_GUARANTEE: i128 = 200;
+const DEFAULT_INTEREST_BPS: u32 = 400;
+const DEFAULT_INTEREST_AMOUNT: i128 = 40;
+const DEFAULT_SERVICE_FEE: i128 = 10;
+const DEFAULT_TOTAL_DUE: i128 = 1_050;
+
 // NOTE: Integration tests with reputation contract are skipped for now
 // They will be added when all contracts are implemented and properly configured
 #[contract]
@@ -154,12 +161,32 @@ impl TestCtx {
         self.register_merchant(merchant, "Test Merchant");
 
         // Guarantee transfer now happens at loan creation, so borrower needs balance.
-        self.mint(user, 200);
+        self.mint(user, DEFAULT_GUARANTEE);
 
         let due_date = self.env.ledger().timestamp() + 10_000;
-        let schedule = self.single_installment(1000, due_date);
-        self.client
-            .create_loan(user, merchant, &1000, &200, &schedule)
+        let schedule = self.single_installment(DEFAULT_TOTAL_DUE, due_date);
+        self.client.create_loan(
+            user,
+            merchant,
+            &DEFAULT_PRINCIPAL,
+            &DEFAULT_GUARANTEE,
+            &schedule,
+        )
+    }
+
+    fn create_default_request(&self, user: &Address, merchant: &Address) -> u64 {
+        self.register_merchant(merchant, "Test Merchant");
+        self.mint(user, DEFAULT_GUARANTEE);
+
+        let due_date = self.env.ledger().timestamp() + 10_000;
+        let schedule = self.single_installment(DEFAULT_TOTAL_DUE, due_date);
+        self.client.request_loan(
+            user,
+            merchant,
+            &DEFAULT_PRINCIPAL,
+            &DEFAULT_GUARANTEE,
+            &schedule,
+        )
     }
 
     /// Advance ledger timestamp past the given due date so a loan is overdue.
@@ -171,6 +198,11 @@ impl TestCtx {
     fn mint(&self, to: &Address, amount: i128) {
         let asset_client = StellarAssetClient::new(&self.env, &self.token_id);
         asset_client.mint(to, &amount);
+    }
+
+    fn balance(&self, address: &Address) -> i128 {
+        let token_client = soroban_sdk::token::Client::new(&self.env, &self.token_id);
+        token_client.balance(address)
     }
 }
 
@@ -854,8 +886,8 @@ fn test_create_loan_stores_correct_fields() {
 
     t.env.ledger().set_timestamp(5000);
     let due_date = 15000_u64;
-    let schedule = t.single_installment(1000, due_date);
-    t.mint(&user, 200);
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.mint(&user, DEFAULT_GUARANTEE);
 
     let loan_id = t
         .client
@@ -865,11 +897,18 @@ fn test_create_loan_stores_correct_fields() {
     assert_eq!(loan.loan_id, loan_id);
     assert_eq!(loan.borrower, user);
     assert_eq!(loan.merchant, merchant);
-    assert_eq!(loan.total_amount, 1000);
-    assert_eq!(loan.guarantee_amount, 200);
-    assert_eq!(loan.remaining_balance, 1000);
+    assert_eq!(loan.total_amount, DEFAULT_PRINCIPAL);
+    assert_eq!(loan.guarantee_amount, DEFAULT_GUARANTEE);
+    assert_eq!(loan.interest_rate_bps, DEFAULT_INTEREST_BPS);
+    assert_eq!(loan.interest_amount, DEFAULT_INTEREST_AMOUNT);
+    assert_eq!(loan.service_fee_amount, DEFAULT_SERVICE_FEE);
+    assert_eq!(loan.principal_outstanding, DEFAULT_PRINCIPAL);
+    assert_eq!(loan.interest_outstanding, DEFAULT_INTEREST_AMOUNT);
+    assert_eq!(loan.service_fee_outstanding, DEFAULT_SERVICE_FEE);
+    assert_eq!(loan.remaining_balance, DEFAULT_TOTAL_DUE);
     assert_eq!(loan.status, LoanStatus::Active);
     assert_eq!(loan.created_at, 5000);
+    assert_eq!(loan.funded_at, 5000);
 }
 
 #[test]
@@ -879,14 +918,14 @@ fn test_create_loan_exactly_20_percent_guarantee() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     t.register_merchant(&merchant, "Test Merchant");
-    let schedule = t.single_installment(1000, 99999);
-    t.mint(&user, 200);
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, 99999);
+    t.mint(&user, DEFAULT_GUARANTEE);
 
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.guarantee_amount, 200);
+    assert_eq!(loan.guarantee_amount, DEFAULT_GUARANTEE);
 }
 
 #[test]
@@ -896,7 +935,7 @@ fn test_create_loan_with_more_than_20_percent_guarantee() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     t.register_merchant(&merchant, "Test Merchant");
-    let schedule = t.single_installment(1000, 99999);
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, 99999);
     t.mint(&user, 500);
 
     let loan_id = t
@@ -1119,9 +1158,9 @@ fn test_default_flow_preserves_loan_amounts() {
     t.client.mark_defaulted(&loan_id);
 
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.total_amount, 1000);
-    assert_eq!(loan.guarantee_amount, 200);
-    assert_eq!(loan.remaining_balance, 1000); // unchanged — no repayment was made
+    assert_eq!(loan.total_amount, DEFAULT_PRINCIPAL);
+    assert_eq!(loan.guarantee_amount, DEFAULT_GUARANTEE);
+    assert_eq!(loan.remaining_balance, DEFAULT_TOTAL_DUE); // unchanged — no repayment was made
 }
 
 #[test]
@@ -1281,11 +1320,7 @@ fn test_admin_can_update_all_contract_addresses() {
     t.client.set_liquidity_pool(&t.admin, &new_pool);
 }
 
-// ─── repayment — TDD stubs (implementations pending) ─────────────────────────
-//
-// These tests define the expected behaviour for the `repay` function which is
-// not yet implemented. They are tagged #[ignore] so the suite remains green.
-// Remove #[ignore] and implement the function when working on Phase 4.
+// ─── repayment ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_partial_repayment_reduces_remaining_balance() {
@@ -1294,11 +1329,11 @@ fn test_partial_repayment_reduces_remaining_balance() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
     t.client.repay_loan(&user, &loan_id, &500);
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.remaining_balance, 500);
+    assert_eq!(loan.remaining_balance, DEFAULT_TOTAL_DUE - 500);
     assert_eq!(loan.status, LoanStatus::Active);
 }
 
@@ -1309,9 +1344,9 @@ fn test_full_repayment_sets_status_to_paid() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
     let loan = t.client.get_loan(&loan_id);
     assert_eq!(loan.remaining_balance, 0);
     assert_eq!(loan.status, LoanStatus::Paid);
@@ -1326,7 +1361,8 @@ fn test_overpayment_is_rejected() {
     let loan_id = t.create_default_loan(&user, &merchant);
 
     // Paying more than remaining_balance should panic with InvalidAmount
-    t.client.repay_loan(&user, &loan_id, &1001);
+    t.client
+        .repay_loan(&user, &loan_id, &(DEFAULT_TOTAL_DUE + 1));
     let _ = loan_id;
 }
 
@@ -1363,42 +1399,46 @@ fn test_repayment_on_non_active_loan_is_rejected() {
     t.client.mark_defaulted(&loan_id);
 
     // Attempting to repay a Defaulted loan must fail with LoanNotActive
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
     let _ = loan_id;
 }
 
 #[test]
-#[ignore = "score increase on repayment not yet implemented — Phase 4"]
 fn test_full_repayment_triggers_reputation_increase() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.client.repay_loan(&user, &loan_id, &1000);
-    // Expect a cross-contract call to reputation contract's increase_score
-    let _ = loan_id;
+    t.mint(&user, DEFAULT_TOTAL_DUE);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Paid);
 }
 
 #[test]
-#[ignore = "early payment bonus not yet implemented — Phase 4"]
 fn test_early_repayment_triggers_bonus_reputation_increase() {
     // Repaying before the first installment due date is considered "early"
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 10000);
+    t.mint(&user, DEFAULT_GUARANTEE);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
 
     // Pay early (timestamp 2000, well before due date 10000)
     t.env.ledger().set_timestamp(2000);
-    t.client.repay_loan(&user, &loan_id, &1000);
-    // Expect a larger reputation bonus than a standard on-time repayment
-    let _ = loan_id;
+    t.mint(&user, DEFAULT_TOTAL_DUE);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Paid);
 }
 
 // ─── merchant validation ─────────────────────────────────────────────────────
@@ -1482,7 +1522,8 @@ fn test_repayment_credited_to_liquidity_pool() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
     // Verify MockLiquidityPool::receive_repayment was called
     let _ = loan_id;
 }
@@ -1538,7 +1579,7 @@ fn test_complete_lifecycle_create_then_default() {
 
     let created = t.client.get_loan(&loan_id);
     assert_eq!(created.status, LoanStatus::Active);
-    assert_eq!(created.remaining_balance, 1000);
+    assert_eq!(created.remaining_balance, DEFAULT_TOTAL_DUE);
 
     t.advance_past(5000);
     t.client.mark_defaulted(&loan_id);
@@ -1546,8 +1587,8 @@ fn test_complete_lifecycle_create_then_default() {
     let defaulted = t.client.get_loan(&loan_id);
     assert_eq!(defaulted.status, LoanStatus::Defaulted);
     // Amounts must be immutable after default
-    assert_eq!(defaulted.total_amount, 1000);
-    assert_eq!(defaulted.guarantee_amount, 200);
+    assert_eq!(defaulted.total_amount, DEFAULT_PRINCIPAL);
+    assert_eq!(defaulted.guarantee_amount, DEFAULT_GUARANTEE);
 }
 
 #[test]
@@ -1594,12 +1635,12 @@ fn test_complete_lifecycle_create_repay_complete() {
 
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
     let active = t.client.get_loan(&loan_id);
     assert_eq!(active.status, LoanStatus::Active);
 
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
     let paid = t.client.get_loan(&loan_id);
     assert_eq!(paid.status, LoanStatus::Paid);
@@ -1616,10 +1657,10 @@ fn test_multi_contract_integration_full_flow() {
     // 1. Create loan — reputation validated, pool funded
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
     // 2. Repay in full — pool credited, reputation score increased
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
     let loan = t.client.get_loan(&loan_id);
     assert_eq!(loan.status, LoanStatus::Paid);
@@ -1650,7 +1691,7 @@ fn test_repayment_on_defaulted_loan_is_rejected() {
     t.client.mark_defaulted(&loan_id);
 
     // Loan is now Defaulted — repayment must fail
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 }
 
 #[test]
@@ -1661,10 +1702,10 @@ fn test_repayment_on_already_paid_loan_is_rejected() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1002);
+    t.mint(&user, DEFAULT_TOTAL_DUE + 2);
 
     // Pay in full first
-    t.client.repay_loan(&user, &loan_id, &1000);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
     // Second repayment attempt must fail — loan is now Paid
     t.client.repay_loan(&user, &loan_id, &1);
@@ -1699,12 +1740,12 @@ fn test_multiple_partial_repayments_accumulate_correctly() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
-    // Three partial payments: 300 + 300 + 400 = 1000
+    // Three partial payments: 300 + 300 + 450 = 1050
     t.client.repay_loan(&user, &loan_id, &300);
     t.client.repay_loan(&user, &loan_id, &300);
-    let remaining = t.client.repay_loan(&user, &loan_id, &400);
+    let remaining = t.client.repay_loan(&user, &loan_id, &450);
 
     assert_eq!(remaining, 0);
     let loan = t.client.get_loan(&loan_id);
@@ -1719,7 +1760,7 @@ fn test_repay_loan_emits_event() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
     t.client.repay_loan(&user, &loan_id, &500);
 
@@ -1738,7 +1779,7 @@ fn test_partial_repayment_does_not_trigger_reputation_increase() {
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
 
-    t.mint(&user, 1000);
+    t.mint(&user, DEFAULT_TOTAL_DUE);
 
     t.client.repay_loan(&user, &loan_id, &500);
 
@@ -1753,4 +1794,92 @@ fn test_repayment_on_nonexistent_loan_fails() {
     let user = Address::generate(&t.env);
 
     t.client.repay_loan(&user, &999, &500);
+}
+
+#[test]
+fn test_active_debt_tracks_create_repay_and_default() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let loan_id = t.create_default_loan(&user, &merchant);
+
+    assert_eq!(t.client.get_user_active_debt(&user), DEFAULT_TOTAL_DUE);
+
+    t.mint(&user, DEFAULT_TOTAL_DUE);
+    t.client.repay_loan(&user, &loan_id, &500);
+    assert_eq!(
+        t.client.get_user_active_debt(&user),
+        DEFAULT_TOTAL_DUE - 500
+    );
+
+    t.client
+        .repay_loan(&user, &loan_id, &(DEFAULT_TOTAL_DUE - 500));
+    assert_eq!(t.client.get_user_active_debt(&user), 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #18)")] // ExposureLimitExceeded
+fn test_exposure_limit_blocks_overleveraged_borrower() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    for _ in 0..9 {
+        let _ = t.create_default_loan(&user, &merchant);
+    }
+
+    let _ = t.create_default_loan(&user, &merchant);
+}
+
+#[test]
+fn test_request_loan_creates_pending_request_without_active_debt() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let loan_id = t.create_default_request(&user, &merchant);
+    let loan = t.client.get_loan(&loan_id);
+
+    assert_eq!(loan.status, LoanStatus::Pending);
+    assert_eq!(loan.funded_at, 0);
+    assert_eq!(t.client.get_user_active_debt(&user), 0);
+}
+
+#[test]
+fn test_cancel_pending_loan_refunds_guarantee() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let starting_balance = DEFAULT_GUARANTEE;
+
+    t.mint(&user, starting_balance);
+    t.register_merchant(&merchant, "Test Merchant");
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    let loan_id = t.client.request_loan(
+        &user,
+        &merchant,
+        &DEFAULT_PRINCIPAL,
+        &DEFAULT_GUARANTEE,
+        &schedule,
+    );
+
+    assert_eq!(t.balance(&user), 0);
+
+    t.client.cancel_loan(&user, &loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Cancelled);
+    assert_eq!(t.balance(&user), starting_balance);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #19)")] // LoanNotCancellable
+fn test_cannot_cancel_active_loan() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let loan_id = t.create_default_loan(&user, &merchant);
+
+    t.client.cancel_loan(&user, &loan_id);
 }

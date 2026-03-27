@@ -18,6 +18,7 @@ enum DataKey {
     Loan(u32, u64),
     UserLoanCount(Address),
     UserLoanAt(Address, u64),
+    UserActiveDebt(Address),
 }
 
 /// Get the admin address from storage
@@ -49,7 +50,9 @@ pub fn increment_loan_counter(env: &Env) -> u64 {
 /// Read a loan from storage
 pub fn read_loan(env: &Env, loan_id: u64) -> Option<Loan> {
     let shard = loan_shard(loan_id);
-    env.storage().persistent().get(&DataKey::Loan(shard, loan_id))
+    env.storage()
+        .persistent()
+        .get(&DataKey::Loan(shard, loan_id))
 }
 
 /// Write a loan to storage
@@ -71,7 +74,12 @@ pub fn get_user_loan_count(env: &Env, borrower: &Address) -> u64 {
         .unwrap_or(0)
 }
 
-pub fn get_user_loan_ids_paginated(env: &Env, borrower: &Address, start: u64, limit: u32) -> Vec<u64> {
+pub fn get_user_loan_ids_paginated(
+    env: &Env,
+    borrower: &Address,
+    start: u64,
+    limit: u32,
+) -> Vec<u64> {
     let total = get_user_loan_count(env, borrower);
     let mut result = Vec::new(env);
 
@@ -92,7 +100,12 @@ pub fn get_user_loan_ids_paginated(env: &Env, borrower: &Address, start: u64, li
     result
 }
 
-pub fn get_user_loans_paginated(env: &Env, borrower: &Address, start: u64, limit: u32) -> Vec<Loan> {
+pub fn get_user_loans_paginated(
+    env: &Env,
+    borrower: &Address,
+    start: u64,
+    limit: u32,
+) -> Vec<Loan> {
     let loan_ids = get_user_loan_ids_paginated(env, borrower, start, limit);
     let mut loans = Vec::new(env);
 
@@ -105,12 +118,38 @@ pub fn get_user_loans_paginated(env: &Env, borrower: &Address, start: u64, limit
     loans
 }
 
+pub fn get_user_active_debt(env: &Env, borrower: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::UserActiveDebt(borrower.clone()))
+        .unwrap_or(0)
+}
+
+pub fn increase_user_active_debt(env: &Env, borrower: &Address, amount: i128) {
+    let current = get_user_active_debt(env, borrower);
+    let next = current
+        .checked_add(amount)
+        .expect("User active debt overflow");
+    env.storage()
+        .persistent()
+        .set(&DataKey::UserActiveDebt(borrower.clone()), &next);
+}
+
+pub fn decrease_user_active_debt(env: &Env, borrower: &Address, amount: i128) {
+    let current = get_user_active_debt(env, borrower);
+    let next = current
+        .checked_sub(amount)
+        .expect("User active debt underflow");
+    env.storage()
+        .persistent()
+        .set(&DataKey::UserActiveDebt(borrower.clone()), &next);
+}
+
 fn append_user_loan_index(env: &Env, borrower: &Address, loan_id: u64) {
     let count = get_user_loan_count(env, borrower);
-    env.storage().persistent().set(
-        &DataKey::UserLoanAt(borrower.clone(), count),
-        &loan_id,
-    );
+    env.storage()
+        .persistent()
+        .set(&DataKey::UserLoanAt(borrower.clone(), count), &loan_id);
     env.storage()
         .persistent()
         .set(&DataKey::UserLoanCount(borrower.clone()), &(count + 1));

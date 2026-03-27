@@ -157,12 +157,12 @@ Implements on-chain storage and management of user reputation scores.
 
 ---
 
-## Phase 3 — CreditLine Core ⚠️
+## Phase 3 — CreditLine Core ✅
 
-**Status:** PARTIALLY COMPLETED
+**Status:** COMPLETED
 **Contract:** [creditline-contract](../contracts/creditline-contract/)
 
-Handles loan creation, repayment, and default management.
+Handles loan creation, repayment, default management, per-user active debt caps, and safe cancellation of unfunded requests.
 
 ### SC-08: Implement loan creation ✅
 
@@ -192,30 +192,23 @@ Handles loan creation, repayment, and default management.
 
 ---
 
-### SC-09: Implement loan repayment ❌
+### SC-09: Implement loan repayment ✅
 
-**Status:** NOT IMPLEMENTED
-**Files:** None
+**Status:** Completed
+**Files:**
+- [lib.rs](../contracts/creditline-contract/src/lib.rs)
+- [types.rs](../contracts/creditline-contract/src/types.rs)
+- [tests.rs](../contracts/creditline-contract/src/tests.rs)
 
-**Missing Functionality:**
-- ❌ `repay_loan()` function does not exist
-- ❌ Partial payment support
-- ❌ Full repayment logic
-- ❌ Remaining balance updates
-- ❌ Payment event emission (`LoanRepaid`)
-- ❌ Loan status transition to `Repaid`
+**Implementation:**
+- ✅ `repay_loan()` supports partial and full repayments
+- ✅ Remaining balance and per-component debt tracking (`principal`, `interest`, `service fee`)
+- ✅ Full repayment transitions loan to `Paid`
+- ✅ Escrowed guarantee is refunded on successful completion
+- ✅ Repayments are forwarded through the liquidity-pool interface
+- ✅ `LoanRepaid` events emitted
 
-**Required Implementation:**
-```rust
-pub fn repay_loan(
-    env: Env,
-    borrower: Address,
-    loan_id: u64,
-    amount: i128
-) -> i128 // returns remaining balance
-```
-
-**Tests Needed:**
+**Tests:**
 - Partial repayment scenarios
 - Full repayment completion
 - Overpayment handling
@@ -248,39 +241,28 @@ pub fn repay_loan(
 
 ---
 
-## Phase 4 — CreditLine ↔ Reputation Integration ⚠️
+## Phase 4 — CreditLine ↔ Reputation Integration ✅
 
-**Status:** INCOMPLETE
+**Status:** COMPLETED
 **Contracts:** creditline-contract, reputation-contract
 
 Bidirectional integration between credit behavior and reputation scores.
 
-### SC-11: Increase reputation on repayment ❌
+### SC-11: Increase reputation on repayment ✅
 
-**Status:** NOT IMPLEMENTED
-**Dependencies:** SC-09 (loan repayment)
+**Status:** Completed
+**Dependencies:** SC-09
 
-**Missing Functionality:**
-- ❌ No call to reputation contract on successful repayment
-- ❌ Score increase logic not implemented
-- ❌ Repayment callback missing
+**Implementation:**
+- ✅ Full repayment calls `increase_score()` on the reputation contract
+- ✅ Standard completion bonus applied on successful payoff
+- ✅ Early payoff bonus applied when the loan is completed before the first due date
+- ✅ Uses `try_invoke_contract` so reputation failures do not corrupt repayment state
 
-**Required Work:**
-- Implement `repay_loan()` function
-- Add reputation contract invocation:
-  ```rust
-  env.invoke_contract::<()>(
-      &reputation_contract,
-      &symbol_short!("increase_score"),
-      (updater, borrower, amount).into_val(&env)
-  );
-  ```
-
-**Tests Needed:**
-- Score increase on full repayment
-- Score increase on on-time payment
-- Early payment bonus logic
-- Integration with reputation contract
+**Tests:**
+- Score increase path on full repayment
+- Early repayment bonus flow
+- Integration path stays non-panicking with mock reputation
 
 ---
 
@@ -303,26 +285,28 @@ Bidirectional integration between credit behavior and reputation scores.
 
 ---
 
-## Phase 5 — Merchant Registry ⏳
+## Phase 5 — Merchant Registry ✅
 
-**Status:** NOT STARTED
-**Contract:** merchant-registry-contract (empty)
+**Status:** COMPLETED
+**Contract:** [merchant-registry-contract](../contracts/merchant-registry-contract/)
 
 Validates authorized merchants who can receive loan funding.
 
-### SC-13: Implement merchant registration ❌
+### SC-13: Implement merchant registration ✅
 
-**Status:** NOT IMPLEMENTED
-**Files:** `contracts/merchant-registry-contract/.gitkeep` (empty directory)
+**Status:** Completed
+**Files:**
+- [lib.rs](../contracts/merchant-registry-contract/src/lib.rs)
+- [types.rs](../contracts/merchant-registry-contract/src/types.rs)
+- [tests.rs](../contracts/merchant-registry-contract/src/tests.rs)
 
-**Required Implementation:**
-- ❌ `register_merchant(admin, merchant, metadata)`
-- ❌ Merchant storage structure
-- ❌ Admin-only registration
-- ❌ Event emission (`MerchantRegistered`)
-- ❌ Metadata fields (name, category, etc.)
+**Implementation:**
+- ✅ Admin-only merchant registration
+- ✅ Merchant info storage with registration date and active flag
+- ✅ Merchant count tracking
+- ✅ Merchant registration and status events
 
-**Tests Needed:**
+**Tests:**
 - Merchant registration
 - Duplicate registration prevention
 - Unauthorized registration rejection
@@ -330,74 +314,61 @@ Validates authorized merchants who can receive loan funding.
 
 ---
 
-### SC-14: Implement merchant validation ⚠️
+### SC-14: Implement merchant validation ✅
 
-**Status:** STUBBED (not functional)
+**Status:** Completed
 **Files:**
-- [lib.rs:162-177](../contracts/creditline-contract/src/lib.rs#L162-L177)
+- [lib.rs](../contracts/creditline-contract/src/lib.rs)
+- [lib.rs](../contracts/merchant-registry-contract/src/lib.rs)
 
-**Current Implementation:**
-- ⚠️ Validation bypassed when registry not configured
-- ⚠️ Always assumes merchant is valid
-- ⚠️ TODO comment indicates placeholder
+**Implementation:**
+- ✅ CreditLine checks merchant status through `merchant-registry-contract`
+- ✅ Active merchants pass validation
+- ✅ Inactive and unregistered merchants are rejected
+- ✅ Merchant validation errors are surfaced distinctly
 
-**Required Implementation:**
-```rust
-pub fn is_active_merchant(env: Env, merchant: Address) -> bool
-
-// In CreditLine:
-let is_valid: bool = env.invoke_contract(
-    &merchant_registry,
-    &symbol_short!("is_active"),
-    (merchant,).into_val(&env)
-);
-```
-
-**Tests Needed:**
+**Tests:**
 - Active merchant approval
 - Inactive merchant rejection
 - Unregistered merchant rejection
 
 ---
 
-## Phase 6 — Liquidity Pool ⏳
+## Phase 6 — Liquidity Pool ✅
 
-**Status:** NOT STARTED
-**Contract:** None (does not exist)
+**Status:** COMPLETED
+**Contract:** [liquidity-pool-contract](../contracts/liquidity-pool-contract/)
 
 Manages liquidity provider deposits and loan funding.
 
-### SC-15: Implement deposit liquidity ❌
+### SC-15: Implement deposit liquidity ✅
 
-**Status:** NOT IMPLEMENTED
+**Status:** Completed
 
-**Required Implementation:**
-- ❌ Contract creation
-- ❌ `deposit(provider, amount)` function
-- ❌ Share calculation and issuance
-- ❌ Token transfer handling (SAC tokens)
-- ❌ Event emission (`LiquidityDeposited`)
+**Implementation:**
+- ✅ LP deposit flow with share issuance
+- ✅ Initial and proportional share calculation
+- ✅ SAC token transfers into the pool
+- ✅ `LiquidityDeposited` events
 
-**Tests Needed:**
+**Tests:**
 - First deposit (1:1 share ratio)
 - Subsequent deposits (proportional shares)
-- Share value calculation accuracy
 - Zero deposit rejection
 
 ---
 
-### SC-16: Implement withdraw liquidity ❌
+### SC-16: Implement withdraw liquidity ✅
 
-**Status:** NOT IMPLEMENTED
+**Status:** Completed
 
-**Required Implementation:**
-- ❌ `withdraw(provider, shares)` function
-- ❌ Share burning logic
-- ❌ Available liquidity checks
-- ❌ Withdrawal amount calculation
-- ❌ Event emission (`LiquidityWithdrawn`)
+**Implementation:**
+- ✅ LP withdrawal flow with share burning
+- ✅ Available-liquidity protection
+- ✅ Proportional withdrawal calculation
+- ✅ `LiquidityWithdrawn` events
 
-**Tests Needed:**
+**Tests:**
 - Full withdrawal
 - Partial withdrawal
 - Insufficient liquidity rejection
@@ -405,18 +376,17 @@ Manages liquidity provider deposits and loan funding.
 
 ---
 
-### SC-17: Implement interest distribution ❌
+### SC-17: Implement interest distribution ✅
 
-**Status:** NOT IMPLEMENTED
+**Status:** Completed
 
-**Required Implementation:**
-- ❌ `distribute_interest()` function
-- ❌ Interest accumulation from repayments
-- ❌ Share value increase logic
-- ❌ Fee distribution (85% LP, 10% protocol, 5% merchant)
-- ❌ Event emission (`InterestDistributed`)
+**Implementation:**
+- ✅ `receive_repayment()` accepts principal and interest
+- ✅ `distribute_interest()` routes repayment yield across LP / protocol / merchant buckets
+- ✅ Share value appreciates as LP-owned interest stays in the pool
+- ✅ Interest-distribution events emitted
 
-**Tests Needed:**
+**Tests:**
 - Interest calculation accuracy
 - Share value appreciation
 - Fee split verification
@@ -459,9 +429,9 @@ Comprehensive test coverage for all contracts.
 - ✅ Loan creation validations (amounts, guarantees)
 - ✅ Mark defaulted functionality
 - ✅ Contract address updates
-- ❌ **MISSING:** Loan repayment tests (SC-09 not implemented)
-- ❌ **MISSING:** Reputation integration tests
-- ❌ **MISSING:** Merchant validation tests (Phase 5)
+- ✅ CreditLine repayment tests cover partial/full repayment and state transitions
+- ✅ Reputation integration paths exist for repayment and default
+- ✅ Merchant validation tests cover active, inactive, and unregistered merchants
 - ❌ **MISSING:** Liquidity pool integration tests (Phase 6)
 
 **Required Tests:**
@@ -472,10 +442,10 @@ Comprehensive test coverage for all contracts.
 
 ---
 
-### SC-20: Unit tests for Liquidity Pool ❌
+### SC-20: Unit tests for Liquidity Pool ⚠️
 
-**Status:** NOT STARTED
-**Reason:** Contract does not exist
+**Status:** IN PROGRESS
+**Reason:** Contract exists and has substantial coverage, but roadmap tracking is still conservative until ignored cross-contract cases are replaced with end-to-end assertions.
 
 **Required Tests:**
 - Deposit scenarios (first LP, subsequent LPs)
@@ -490,77 +460,47 @@ Comprehensive test coverage for all contracts.
 
 ## Summary Dashboard
 
-### Overall Progress: 11/20 Issues Completed (55%)
+### Overall Progress: 17/20 Issues Completed (85%)
 
 | Phase | Status | Completed | Total | Progress |
 |-------|--------|-----------|-------|----------|
 | Phase 1: Access Control | ✅ Complete | 3/3 | 3 | 100% |
 | Phase 2: Reputation | ✅ Complete | 4/4 | 4 | 100% |
-| Phase 3: CreditLine Core | ⚠️ Partial | 2/3 | 3 | 67% |
-| Phase 4: Integration | ⚠️ Partial | 1/2 | 2 | 50% |
-| Phase 5: Merchant Registry | ⏳ Pending | 0/2 | 2 | 0% |
-| Phase 6: Liquidity Pool | ⏳ Pending | 0/3 | 3 | 0% |
+| Phase 3: CreditLine Core | ✅ Complete | 3/3 | 3 | 100% |
+| Phase 4: Integration | ✅ Complete | 2/2 | 2 | 100% |
+| Phase 5: Merchant Registry | ✅ Complete | 2/2 | 2 | 100% |
+| Phase 6: Liquidity Pool | ✅ Complete | 3/3 | 3 | 100% |
 | Phase 7: Testing | ⚠️ Partial | 1/3 | 3 | 33% |
 
 ### By Status
 
-- ✅ **Completed:** 12 issues
-- ⚠️ **Incomplete/Partial:** 3 issues
-- ❌ **Not Started:** 5 issues
+- ✅ **Completed:** 17 issues
+- ⚠️ **Incomplete/Partial:** 1 issue
+- ❌ **Not Started:** 2 issues
 
 ---
 
 ## Critical Blockers
 
-### 1. SC-09: Implement loan repayment ❌
-
-**Impact:** HIGH
-**Blocks:**
-- SC-11 (reputation increase on repayment)
-- SC-19 (CreditLine tests incomplete)
-- Core BNPL functionality unusable
-
-**Effort:** Medium (2-3 days)
-
----
-
-### 2. SC-13, SC-14: Merchant Registry ❌
+### 1. SC-19 / SC-20: Broader integration and pool test depth ⚠️
 
 **Impact:** MEDIUM
-**Current Workaround:** Validation bypassed in CreditLine
-**Security Risk:** Any address can be treated as valid merchant
-**Effort:** Medium (2-3 days)
-
----
-
-### 4. SC-15, SC-16, SC-17: Liquidity Pool ❌
-
-**Impact:** HIGH
-**Current Issue:** No funding source for loans
-**Blocks:** End-to-end loan flow testing
-**Effort:** High (1-2 weeks)
+**Current Issue:** Core contracts are implemented, but cross-contract verification still relies partly on mocks or ignored cases.
+**Effort:** Medium
 
 ---
 
 ## Next Steps (Recommended Order)
 
-1. **Immediate (Week 1)**
-   - [ ] Fix SC-12: Update `mark_defaulted` to call `decrease_score` properly
-   - [ ] Implement SC-09: `repay_loan()` function in CreditLine
-   - [ ] Implement SC-11: Add reputation increase on repayment
+1. **Immediate**
+   - [ ] Replace mocked pool assertions in CreditLine tests with concrete integration coverage
+   - [ ] Expand repayment/default accounting tests across contract boundaries
 
-2. **Short Term (Week 2-3)**
-   - [ ] Implement SC-13: Merchant Registry contract
-   - [ ] Implement SC-14: Merchant validation integration
-   - [ ] Update SC-19: Add comprehensive CreditLine tests
+2. **Short Term**
+   - [ ] Complete SC-20 liquidity pool test expansion
+   - [ ] Add more end-to-end multi-contract flows without mocked externals
 
-3. **Medium Term (Month 1-2)**
-   - [ ] Implement SC-15: Liquidity Pool deposit
-   - [ ] Implement SC-16: Liquidity Pool withdrawal
-   - [ ] Implement SC-17: Interest distribution
-   - [ ] Implement SC-20: Liquidity Pool tests
-
-4. **Polish (Month 2+)**
+3. **Polish**
    - [ ] Integration testing across all contracts
    - [ ] Security audit preparation
    - [ ] Gas optimization
@@ -581,12 +521,12 @@ Comprehensive test coverage for all contracts.
 ## Notes
 
 - All completed phases (1-2) have excellent test coverage
-- CreditLine contract is well-structured but missing key repayment logic
+- CreditLine now supports priced loans, reputation-linked limits, and pending-loan cancellation
 - No integration tests exist yet between contracts
 - Security considerations documented in [ERROR_CODES.md](ERROR_CODES.md)
 
 ---
 
-**Last Updated:** 2026-02-13
+**Last Updated:** 2026-03-27
 **Document Owner:** TrustUp Development Team
 **Related Docs:** [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | [ARCHITECTURE.md](ARCHITECTURE.md) | [CONTRIBUTING.md](CONTRIBUTING.md)

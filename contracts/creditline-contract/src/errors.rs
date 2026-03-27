@@ -22,4 +22,6 @@ pub enum CreditLineError {
     TokenNotConfigured = 15,
     InvalidMerchant = 16,
     MerchantValidationFailed = 17,
+    ExposureLimitExceeded = 18,
+    LoanNotCancellable = 19,
 }

@@ -4,8 +4,10 @@ use crate::types::RepaymentInstallment;
 
 // Event topics
 const LOAN_CREATED: Symbol = symbol_short!("LOANCRTD");
+const LOAN_REQUESTED: Symbol = symbol_short!("LOANRQST");
 const LOAN_DEFAULTED: Symbol = symbol_short!("LOANDFLT");
 const LOAN_REPAID: Symbol = symbol_short!("LOANRPD");
+const LOAN_CANCELLED: Symbol = symbol_short!("LOANCNCL");
 
 /// Emit a loan created event
 pub fn emit_loan_created(
@@ -19,6 +21,26 @@ pub fn emit_loan_created(
 ) {
     env.events().publish(
         (LOAN_CREATED, user, merchant),
+        (
+            loan_id,
+            total_amount,
+            guarantee_amount,
+            repayment_schedule.clone(),
+        ),
+    );
+}
+
+pub fn emit_loan_requested(
+    env: &Env,
+    user: &Address,
+    merchant: &Address,
+    loan_id: u64,
+    total_amount: i128,
+    guarantee_amount: i128,
+    repayment_schedule: &Vec<RepaymentInstallment>,
+) {
+    env.events().publish(
+        (LOAN_REQUESTED, user, merchant),
         (
             loan_id,
             total_amount,
@@ -63,5 +85,12 @@ pub fn emit_loan_repaid(
             is_fully_repaid,
             env.ledger().timestamp(),
         ),
+    );
+}
+
+pub fn emit_loan_cancelled(env: &Env, borrower: &Address, loan_id: u64, refunded_guarantee: i128) {
+    env.events().publish(
+        (LOAN_CANCELLED, borrower, loan_id),
+        (refunded_guarantee, env.ledger().timestamp()),
     );
 }
