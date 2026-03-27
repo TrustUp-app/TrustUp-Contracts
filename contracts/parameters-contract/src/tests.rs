@@ -35,6 +35,7 @@ fn test_update_parameters() {
         large_loan_threshold: 7_500,
         large_loan_default_penalty: 40,
         base_interest_bps: 900,
+        grace_period_seconds: 86_400,
     };
 
     client.update_parameters(&admin, &params);

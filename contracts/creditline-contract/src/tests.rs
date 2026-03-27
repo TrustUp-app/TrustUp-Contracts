@@ -1283,6 +1283,214 @@ fn test_mark_defaulted_triggers_reputation_slash() {
     assert_eq!(loan.status, LoanStatus::Defaulted);
 }
 
+// ─── grace period ─────────────────────────────────────────────────────────────
+
+/// Helper: register and wire up a ParametersContract with the given grace period.
+fn setup_parameters_with_grace_period(t: &TestCtx, grace_period_seconds: u64) {
+    use soroban_sdk::Symbol;
+    let params_id = t.env.register(ParametersContract, ());
+    let params_client = ParametersContractClient::new(&t.env, &params_id);
+    params_client.initialize(
+        &t.admin,
+        &ProtocolParameters {
+            grace_period_seconds,
+            ..default_parameters()
+        },
+    );
+    t.client.set_parameters_contract(&t.admin, &params_id);
+}
+
+#[test]
+fn test_mark_defaulted_blocked_during_grace_period() {
+    // With a 1000-second grace period the loan cannot be hard-defaulted while
+    // the clock is still inside due_date < t <= due_date + grace.
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    setup_parameters_with_grace_period(&t, 1_000);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // One second past due but still within the grace window.
+    t.env.ledger().set_timestamp(due_date + 1);
+    let result = t.client.try_mark_defaulted(&loan_id);
+    assert!(
+        result.is_err(),
+        "mark_defaulted must fail while inside the grace period"
+    );
+    // Verify the loan is still Active — not Defaulted.
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Active);
+}
+
+#[test]
+fn test_mark_defaulted_succeeds_after_grace_period_expires() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // One second past the end of the grace window.
+    t.env.ledger().set_timestamp(due_date + grace + 1);
+    t.client.mark_defaulted(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Defaulted);
+}
+
+#[test]
+fn test_mark_defaulted_at_grace_period_boundary_still_blocked() {
+    // At exactly due_date + grace_period the loan is still protected.
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + grace);
+    let result = t.client.try_mark_defaulted(&loan_id);
+    assert!(
+        result.is_err(),
+        "mark_defaulted must fail at exactly the grace period boundary"
+    );
+}
+
+#[test]
+fn test_warn_grace_period_emits_event() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // Advance into the grace window and call warn_grace_period.
+    t.env.ledger().set_timestamp(due_date + 1);
+    let result = t.client.try_warn_grace_period(&loan_id);
+    assert!(
+        result.is_ok(),
+        "warn_grace_period should succeed inside the grace window"
+    );
+    // Loan must remain Active.
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Active);
+}
+
+#[test]
+fn test_warn_grace_period_fails_before_due_date() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    setup_parameters_with_grace_period(&t, 1_000);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // Still before due date — should return LoanNotOverdue.
+    let result = t.client.try_warn_grace_period(&loan_id);
+    assert!(
+        result.is_err(),
+        "warn_grace_period must fail before the due date"
+    );
+}
+
+#[test]
+fn test_warn_grace_period_fails_after_grace_expires() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // Past the grace window — no longer in grace period.
+    t.env.ledger().set_timestamp(due_date + grace + 1);
+    let result = t.client.try_warn_grace_period(&loan_id);
+    assert!(
+        result.is_err(),
+        "warn_grace_period must fail after the grace period expires"
+    );
+}
+
+#[test]
+fn test_zero_grace_period_allows_immediate_default() {
+    // grace_period_seconds = 0 preserves the original one-second-past-due behavior.
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    setup_parameters_with_grace_period(&t, 0);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + 1);
+    t.client.mark_defaulted(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Defaulted);
+}
+
 // ─── admin access control ─────────────────────────────────────────────────────
 
 #[test]
