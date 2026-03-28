@@ -10,6 +10,10 @@ pub struct ProtocolParameters {
     pub large_loan_threshold: i128,
     pub large_loan_default_penalty: u32,
     pub base_interest_bps: u32,
+    /// Seconds after the last installment due date before a hard default can be triggered.
+    /// During this window the borrower can still repay (with late fees) and no reputation
+    /// penalty is applied yet.  Set to 0 to disable the grace period.
+    pub grace_period_seconds: u64,
 }
 
 pub const DEFAULT_MIN_GUARANTEE_PERCENT: i128 = 20;
@@ -19,6 +23,9 @@ pub const DEFAULT_DEFAULT_PENALTY: u32 = 20;
 pub const DEFAULT_LARGE_LOAN_THRESHOLD: i128 = 5_000;
 pub const DEFAULT_LARGE_LOAN_DEFAULT_PENALTY: u32 = 30;
 pub const DEFAULT_BASE_INTEREST_BPS: u32 = 0;
+/// Default grace period: disabled (0).  Set via governance to enable, e.g.
+/// 259_200 for a 3-day window.
+pub const DEFAULT_GRACE_PERIOD_SECONDS: u64 = 0;
 
 pub fn default_parameters() -> ProtocolParameters {
     ProtocolParameters {
@@ -29,5 +36,6 @@ pub fn default_parameters() -> ProtocolParameters {
         large_loan_threshold: DEFAULT_LARGE_LOAN_THRESHOLD,
         large_loan_default_penalty: DEFAULT_LARGE_LOAN_DEFAULT_PENALTY,
         base_interest_bps: DEFAULT_BASE_INTEREST_BPS,
+        grace_period_seconds: DEFAULT_GRACE_PERIOD_SECONDS,
     }
 }

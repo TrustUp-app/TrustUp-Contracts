@@ -397,6 +397,50 @@ impl CreditLineContract {
         }
     }
 
+    /// Warn that a loan is past due but still within the grace period.
+    /// Emits a `LOANGRC` event so off-chain services and borrowers can be notified.
+    /// Returns `LoanNotOverdue` if the loan is not yet past its due date, and
+    /// `LoanNotActive` if the loan is not active.  Returns `Ok(())` when the
+    /// warning event was successfully emitted (i.e. the loan is in the grace window).
+    pub fn warn_grace_period(env: Env, loan_id: u64) -> Result<(), CreditLineError> {
+        let loan = storage::read_loan(&env, loan_id).ok_or(CreditLineError::LoanNotFound)?;
+
+        if loan.status != LoanStatus::Active {
+            return Err(CreditLineError::LoanNotActive);
+        }
+
+        let last_installment = loan
+            .repayment_schedule
+            .last()
+            .ok_or(CreditLineError::Overflow)?;
+
+        let now = env.ledger().timestamp();
+        if now <= last_installment.due_date {
+            return Err(CreditLineError::LoanNotOverdue);
+        }
+
+        let params = Self::get_protocol_parameters(&env);
+        let grace_ends_at = last_installment
+            .due_date
+            .checked_add(params.grace_period_seconds)
+            .ok_or(CreditLineError::Overflow)?;
+
+        if now > grace_ends_at {
+            // Grace period already expired — not in grace period anymore.
+            return Err(CreditLineError::LoanNotOverdue);
+        }
+
+        events::emit_loan_in_grace_period(
+            &env,
+            &loan.borrower,
+            loan_id,
+            loan.remaining_balance,
+            grace_ends_at,
+        );
+
+        Ok(())
+    }
+
     pub fn mark_defaulted(env: Env, loan_id: u64) -> Result<(), CreditLineError> {
         let mut loan = storage::read_loan(&env, loan_id).ok_or(CreditLineError::LoanNotFound)?;
 
@@ -409,8 +453,27 @@ impl CreditLineContract {
             .last()
             .ok_or(CreditLineError::Overflow)?;
 
-        if env.ledger().timestamp() <= last_installment.due_date {
+        let now = env.ledger().timestamp();
+        if now <= last_installment.due_date {
             return Err(CreditLineError::LoanNotOverdue);
+        }
+
+        let params = Self::get_protocol_parameters(&env);
+        let grace_ends_at = last_installment
+            .due_date
+            .checked_add(params.grace_period_seconds)
+            .ok_or(CreditLineError::Overflow)?;
+
+        if now <= grace_ends_at {
+            // Still within the grace window — emit a warning and block hard default.
+            events::emit_loan_in_grace_period(
+                &env,
+                &loan.borrower,
+                loan_id,
+                loan.remaining_balance,
+                grace_ends_at,
+            );
+            return Err(CreditLineError::LoanInGracePeriod);
         }
 
         let lp_address =
@@ -593,11 +656,19 @@ impl CreditLineContract {
         if is_fully_repaid {
             if let Some(reputation_contract) = storage::get_reputation_contract(&env) {
                 let updater = env.current_contract_address();
-                let params = Self::get_protocol_parameters(&env);
-                let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+                let payment_date = env.ledger().timestamp();
+                let due_date = loan
+                    .repayment_schedule
+                    .last()
+                    .map(|i| i.due_date)
+                    .unwrap_or(0);
+                Self::handle_reputation_increase(
+                    &env,
                     &reputation_contract,
-                    &Symbol::new(&env, "increase_score"),
-                    (updater, borrower, params.full_repayment_reward).into_val(&env),
+                    &updater,
+                    &borrower,
+                    payment_date,
+                    due_date,
                 );
             }
         }
@@ -708,6 +779,22 @@ impl CreditLineContract {
         storage::increase_user_active_debt(&env, &loan.borrower, accrued_fee);
         storage::write_loan(&env, &loan);
         events::emit_late_fee_accrued(&env, &loan.borrower, loan_id, accrued_fee, loan.remaining_balance);
+    }
+
+    fn handle_reputation_increase(
+        env: &Env,
+        reputation_contract: &Address,
+        updater: &Address,
+        borrower: &Address,
+        payment_date: u64,
+        due_date: u64,
+    ) {
+        let score_increase: u32 = if payment_date < due_date { 15 } else { 10 };
+        let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            reputation_contract,
+            &Symbol::new(env, "increase_score"),
+            (updater, borrower, score_increase).into_val(env),
+        );
     }
 
     fn get_protocol_parameters(env: &Env) -> ProtocolParameters {

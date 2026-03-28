@@ -1283,6 +1283,214 @@ fn test_mark_defaulted_triggers_reputation_slash() {
     assert_eq!(loan.status, LoanStatus::Defaulted);
 }
 
+// ─── grace period ─────────────────────────────────────────────────────────────
+
+/// Helper: register and wire up a ParametersContract with the given grace period.
+fn setup_parameters_with_grace_period(t: &TestCtx, grace_period_seconds: u64) {
+    use soroban_sdk::Symbol;
+    let params_id = t.env.register(ParametersContract, ());
+    let params_client = ParametersContractClient::new(&t.env, &params_id);
+    params_client.initialize(
+        &t.admin,
+        &ProtocolParameters {
+            grace_period_seconds,
+            ..default_parameters()
+        },
+    );
+    t.client.set_parameters_contract(&t.admin, &params_id);
+}
+
+#[test]
+fn test_mark_defaulted_blocked_during_grace_period() {
+    // With a 1000-second grace period the loan cannot be hard-defaulted while
+    // the clock is still inside due_date < t <= due_date + grace.
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    setup_parameters_with_grace_period(&t, 1_000);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // One second past due but still within the grace window.
+    t.env.ledger().set_timestamp(due_date + 1);
+    let result = t.client.try_mark_defaulted(&loan_id);
+    assert!(
+        result.is_err(),
+        "mark_defaulted must fail while inside the grace period"
+    );
+    // Verify the loan is still Active — not Defaulted.
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Active);
+}
+
+#[test]
+fn test_mark_defaulted_succeeds_after_grace_period_expires() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // One second past the end of the grace window.
+    t.env.ledger().set_timestamp(due_date + grace + 1);
+    t.client.mark_defaulted(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Defaulted);
+}
+
+#[test]
+fn test_mark_defaulted_at_grace_period_boundary_still_blocked() {
+    // At exactly due_date + grace_period the loan is still protected.
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + grace);
+    let result = t.client.try_mark_defaulted(&loan_id);
+    assert!(
+        result.is_err(),
+        "mark_defaulted must fail at exactly the grace period boundary"
+    );
+}
+
+#[test]
+fn test_warn_grace_period_emits_event() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // Advance into the grace window and call warn_grace_period.
+    t.env.ledger().set_timestamp(due_date + 1);
+    let result = t.client.try_warn_grace_period(&loan_id);
+    assert!(
+        result.is_ok(),
+        "warn_grace_period should succeed inside the grace window"
+    );
+    // Loan must remain Active.
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Active);
+}
+
+#[test]
+fn test_warn_grace_period_fails_before_due_date() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    setup_parameters_with_grace_period(&t, 1_000);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // Still before due date — should return LoanNotOverdue.
+    let result = t.client.try_warn_grace_period(&loan_id);
+    assert!(
+        result.is_err(),
+        "warn_grace_period must fail before the due date"
+    );
+}
+
+#[test]
+fn test_warn_grace_period_fails_after_grace_expires() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    let grace: u64 = 1_000;
+    setup_parameters_with_grace_period(&t, grace);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    // Past the grace window — no longer in grace period.
+    t.env.ledger().set_timestamp(due_date + grace + 1);
+    let result = t.client.try_warn_grace_period(&loan_id);
+    assert!(
+        result.is_err(),
+        "warn_grace_period must fail after the grace period expires"
+    );
+}
+
+#[test]
+fn test_zero_grace_period_allows_immediate_default() {
+    // grace_period_seconds = 0 preserves the original one-second-past-due behavior.
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
+
+    setup_parameters_with_grace_period(&t, 0);
+
+    let due_date = 5_000_u64;
+    t.env.ledger().set_timestamp(1_000);
+    let schedule = t.single_installment(1_000, due_date);
+    t.mint(&user, 200);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + 1);
+    t.client.mark_defaulted(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Defaulted);
+}
+
 // ─── admin access control ─────────────────────────────────────────────────────
 
 #[test]
@@ -2120,7 +2328,7 @@ fn test_end_to_end_happy_path_across_all_contracts() {
 
     let loan = t.creditline.get_loan(&loan_id);
     assert_eq!(loan.status, LoanStatus::Paid);
-    assert_eq!(t.reputation.get_score(&user), 90);
+    assert_eq!(t.reputation.get_score(&user), 95); // early repayment: +15 (80 → 95)
 
     t.mint(&t.creditline_id, 100);
     t.pool.receive_repayment(&t.creditline_id, &0, &100);
@@ -2406,4 +2614,132 @@ fn test_active_debt_includes_late_fees() {
 
     let debt_after = t.client.get_user_active_debt(&user);
     assert_eq!(debt_after, debt_before + 5);
+}
+
+// ─── reputation increase on repayment ────────────────────────────────────────
+
+#[test]
+fn test_on_time_full_repayment_increases_score_by_10() {
+    // Payment at exactly the due date (not early) → +10
+    let t = RealIntegrationCtx::setup();
+    let provider = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.fund_pool(&provider, 10_000);
+    t.register_merchant(&merchant, "On-Time Merchant");
+    t.set_score(&user, 60);
+    t.mint(&user, 1_300);
+
+    let due_date = 5_000_u64;
+    let schedule = t.single_installment(1_000, due_date);
+    let loan_id = t
+        .creditline
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    let loan = t.creditline.get_loan(&loan_id);
+    let total_due = loan.remaining_balance;
+    t.mint(&user, total_due);
+
+    // Advance to exactly due_date — payment_date == due_date is NOT early
+    t.env.ledger().set_timestamp(due_date);
+    t.creditline.repay_loan(&user, &loan_id, &total_due);
+
+    assert_eq!(t.reputation.get_score(&user), 70); // on-time: +10 (60 → 70)
+}
+
+#[test]
+fn test_early_full_repayment_increases_score_by_15() {
+    // Payment well before the due date → +15
+    let t = RealIntegrationCtx::setup();
+    let provider = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.fund_pool(&provider, 10_000);
+    t.register_merchant(&merchant, "Early Merchant");
+    t.set_score(&user, 60);
+    t.mint(&user, 1_300);
+
+    t.env.ledger().set_timestamp(1_000);
+    let due_date = 10_000_u64;
+    let schedule = t.single_installment(1_000, due_date);
+    let loan_id = t
+        .creditline
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    let loan = t.creditline.get_loan(&loan_id);
+    let total_due = loan.remaining_balance;
+    t.mint(&user, total_due);
+
+    // Pay at timestamp 2000, well before due_date 10000
+    t.env.ledger().set_timestamp(2_000);
+    t.creditline.repay_loan(&user, &loan_id, &total_due);
+
+    assert_eq!(t.reputation.get_score(&user), 75); // early: +15 (60 → 75)
+}
+
+#[test]
+fn test_partial_repayment_does_not_change_reputation_score() {
+    // Partial repayment must not trigger any reputation increase
+    let t = RealIntegrationCtx::setup();
+    let provider = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.fund_pool(&provider, 10_000);
+    t.register_merchant(&merchant, "Partial Merchant");
+    t.set_score(&user, 70);
+    t.mint(&user, 1_300);
+
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(1_000, due_date);
+    let loan_id = t
+        .creditline
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    let loan = t.creditline.get_loan(&loan_id);
+    t.mint(&user, loan.remaining_balance);
+    t.creditline.repay_loan(&user, &loan_id, &500);
+
+    assert_eq!(t.reputation.get_score(&user), 70); // unchanged after partial payment
+}
+
+#[test]
+fn test_reputation_call_failure_does_not_block_repayment() {
+    // Even if the reputation contract call fails, the loan repayment must succeed
+    // We verify this by removing the creditline as a reputation updater and
+    // confirming the loan still moves to Paid status.
+    let t = RealIntegrationCtx::setup();
+    let provider = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.fund_pool(&provider, 10_000);
+    t.register_merchant(&merchant, "Fail Merchant");
+    t.set_score(&user, 60);
+    t.mint(&user, 1_300);
+
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(1_000, due_date);
+    let loan_id = t
+        .creditline
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    let loan = t.creditline.get_loan(&loan_id);
+    let total_due = loan.remaining_balance;
+    t.mint(&user, total_due);
+
+    // Revoke updater permission so the increase_score call will fail
+    t.reputation
+        .set_updater(&t.admin, &t.creditline_id, &false);
+
+    // Repayment must still succeed despite the reputation call failure
+    t.creditline.repay_loan(&user, &loan_id, &total_due);
+
+    let loan = t.creditline.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.remaining_balance, 0);
+    // Score unchanged because the call was silently ignored
+    assert_eq!(t.reputation.get_score(&user), 60);
 }

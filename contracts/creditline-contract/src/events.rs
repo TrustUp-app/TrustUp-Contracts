@@ -9,6 +9,7 @@ const LOAN_DEFAULTED: Symbol = symbol_short!("LOANDFLT");
 const LOAN_REPAID: Symbol = symbol_short!("LOANRPD");
 const LOAN_CANCELLED: Symbol = symbol_short!("LOANCNCL");
 const LOAN_LATE_FEE: Symbol = symbol_short!("LOANLTFE");
+const LOAN_GRACE_PERIOD: Symbol = symbol_short!("LOANGRC");
 
 /// Emit a loan created event
 pub fn emit_loan_created(
@@ -106,5 +107,24 @@ pub fn emit_late_fee_accrued(
     env.events().publish(
         (LOAN_LATE_FEE, borrower, loan_id),
         (fee_amount, new_remaining_balance, env.ledger().timestamp()),
+    );
+}
+
+/// Emitted when a loan is past its due date but still within the grace period.
+/// Signals that the borrower can still repay before a hard default is triggered.
+pub fn emit_loan_in_grace_period(
+    env: &Env,
+    borrower: &Address,
+    loan_id: u64,
+    remaining_balance: i128,
+    grace_period_ends_at: u64,
+) {
+    env.events().publish(
+        (LOAN_GRACE_PERIOD, borrower, loan_id),
+        (
+            remaining_balance,
+            grace_period_ends_at,
+            env.ledger().timestamp(),
+        ),
     );
 }
