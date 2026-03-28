@@ -38,8 +38,10 @@ pub struct Loan {
     pub remaining_balance: i128,
     pub repayment_schedule: soroban_sdk::Vec<RepaymentInstallment>,
     pub status: LoanStatus,
-    pub created_at: u64, // Unix timestamp
-    pub funded_at: u64,  // 0 means not funded yet
+    pub created_at: u64,                  // Unix timestamp
+    pub funded_at: u64,                   // 0 means not funded yet
+    pub late_fees_outstanding: i128,      // accumulated unpaid late fees
+    pub late_fee_accrual_timestamp: u64,  // last accrual timestamp (0 = never accrued)
 }
 
 pub fn default_protocol_parameters() -> ProtocolParameters {
@@ -51,3 +53,5 @@ pub const MIN_GUARANTEE_PERCENT: i128 = 20; // 20% minimum guarantee
 pub const MIN_REPUTATION_THRESHOLD: u32 = 50; // Minimum reputation score required
 pub const SERVICE_FEE_BPS: i128 = 100; // 1% flat service fee
 pub const BPS_DENOMINATOR: i128 = 10_000;
+pub const LATE_FEE_BPS_PER_DAY: i128 = 50; // 0.5% of remaining balance per overdue day
+pub const SECONDS_PER_DAY: u64 = 86_400;

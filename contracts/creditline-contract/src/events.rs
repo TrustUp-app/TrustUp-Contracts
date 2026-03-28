@@ -8,6 +8,7 @@ const LOAN_REQUESTED: Symbol = symbol_short!("LOANRQST");
 const LOAN_DEFAULTED: Symbol = symbol_short!("LOANDFLT");
 const LOAN_REPAID: Symbol = symbol_short!("LOANRPD");
 const LOAN_CANCELLED: Symbol = symbol_short!("LOANCNCL");
+const LOAN_LATE_FEE: Symbol = symbol_short!("LOANLTFE");
 const LOAN_GRACE_PERIOD: Symbol = symbol_short!("LOANGRC");
 
 /// Emit a loan created event
@@ -93,6 +94,19 @@ pub fn emit_loan_cancelled(env: &Env, borrower: &Address, loan_id: u64, refunded
     env.events().publish(
         (LOAN_CANCELLED, borrower, loan_id),
         (refunded_guarantee, env.ledger().timestamp()),
+    );
+}
+
+pub fn emit_late_fee_accrued(
+    env: &Env,
+    borrower: &Address,
+    loan_id: u64,
+    fee_amount: i128,
+    new_remaining_balance: i128,
+) {
+    env.events().publish(
+        (LOAN_LATE_FEE, borrower, loan_id),
+        (fee_amount, new_remaining_balance, env.ledger().timestamp()),
     );
 }
 
