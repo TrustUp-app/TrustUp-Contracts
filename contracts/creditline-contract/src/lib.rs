@@ -395,6 +395,50 @@ impl CreditLineContract {
         }
     }
 
+    /// Warn that a loan is past due but still within the grace period.
+    /// Emits a `LOANGRC` event so off-chain services and borrowers can be notified.
+    /// Returns `LoanNotOverdue` if the loan is not yet past its due date, and
+    /// `LoanNotActive` if the loan is not active.  Returns `Ok(())` when the
+    /// warning event was successfully emitted (i.e. the loan is in the grace window).
+    pub fn warn_grace_period(env: Env, loan_id: u64) -> Result<(), CreditLineError> {
+        let loan = storage::read_loan(&env, loan_id).ok_or(CreditLineError::LoanNotFound)?;
+
+        if loan.status != LoanStatus::Active {
+            return Err(CreditLineError::LoanNotActive);
+        }
+
+        let last_installment = loan
+            .repayment_schedule
+            .last()
+            .ok_or(CreditLineError::Overflow)?;
+
+        let now = env.ledger().timestamp();
+        if now <= last_installment.due_date {
+            return Err(CreditLineError::LoanNotOverdue);
+        }
+
+        let params = Self::get_protocol_parameters(&env);
+        let grace_ends_at = last_installment
+            .due_date
+            .checked_add(params.grace_period_seconds)
+            .ok_or(CreditLineError::Overflow)?;
+
+        if now > grace_ends_at {
+            // Grace period already expired — not in grace period anymore.
+            return Err(CreditLineError::LoanNotOverdue);
+        }
+
+        events::emit_loan_in_grace_period(
+            &env,
+            &loan.borrower,
+            loan_id,
+            loan.remaining_balance,
+            grace_ends_at,
+        );
+
+        Ok(())
+    }
+
     pub fn mark_defaulted(env: Env, loan_id: u64) -> Result<(), CreditLineError> {
         let mut loan = storage::read_loan(&env, loan_id).ok_or(CreditLineError::LoanNotFound)?;
 
@@ -407,8 +451,27 @@ impl CreditLineContract {
             .last()
             .ok_or(CreditLineError::Overflow)?;
 
-        if env.ledger().timestamp() <= last_installment.due_date {
+        let now = env.ledger().timestamp();
+        if now <= last_installment.due_date {
             return Err(CreditLineError::LoanNotOverdue);
+        }
+
+        let params = Self::get_protocol_parameters(&env);
+        let grace_ends_at = last_installment
+            .due_date
+            .checked_add(params.grace_period_seconds)
+            .ok_or(CreditLineError::Overflow)?;
+
+        if now <= grace_ends_at {
+            // Still within the grace window — emit a warning and block hard default.
+            events::emit_loan_in_grace_period(
+                &env,
+                &loan.borrower,
+                loan_id,
+                loan.remaining_balance,
+                grace_ends_at,
+            );
+            return Err(CreditLineError::LoanInGracePeriod);
         }
 
         let lp_address =
