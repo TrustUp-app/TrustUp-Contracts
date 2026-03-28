@@ -338,10 +338,10 @@ See [ROADMAP.md](./docs/ROADMAP.md) for detailed breakdown.
 </td>
 
 <td align="center">
-  <a href="https://github.com/Birdmannn">
-    <img src="https://avatars.githubusercontent.com/u/95439583?v=4" width="100px;" style="border-radius:50%;" alt="Birdmannn"/><br />
-    <sub><b>🥉 @Birdmannn</b></sub><br />
-    <sub>5 contributions</sub>
+  <a href="https://github.com/davedumto">
+    <img src="https://avatars.githubusercontent.com/u/112870446?v=4" width="100px;" style="border-radius:50%;" alt="davedumto"/><br />
+    <sub><b>🥉 @davedumto</b></sub><br />
+    <sub>6 contributions</sub>
   </a>
 </td>
 
