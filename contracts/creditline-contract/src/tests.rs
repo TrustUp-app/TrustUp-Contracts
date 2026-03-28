@@ -2166,3 +2166,236 @@ fn test_end_to_end_default_path_guarantee_and_penalty() {
     assert_eq!(t.balance(&t.pool.address), pool_balance_after_loan + 200);
     assert_eq!(pool_stats.locked_liquidity, 600);
 }
+
+// ─── late fee tests ───────────────────────────────────────────────────────────
+
+// LATE_FEE_BPS_PER_DAY = 50, BPS_DENOMINATOR = 10_000, SECONDS_PER_DAY = 86_400
+// For DEFAULT_TOTAL_DUE = 1_050: fee per day = 1050 * 50 / 10_000 = 5
+
+const SECONDS_PER_DAY: u64 = 86_400;
+
+#[test]
+fn test_no_late_fee_before_due_date() {
+    // A loan repaid before its due date must have zero late fees
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.env.ledger().set_timestamp(1_000);
+    let due_date = 50_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.late_fees_outstanding, 0);
+    assert_eq!(loan.late_fee_accrual_timestamp, 0);
+}
+
+#[test]
+fn test_apply_late_fees_adds_fee_after_one_day_overdue() {
+    // apply_late_fees after exactly 1 full day overdue must add 5 to remaining_balance
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 1_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    // Advance 1 full day past due_date
+    t.env.ledger().set_timestamp(due_date + SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    // fee = 1050 * 50 / 10_000 = 5
+    assert_eq!(loan.late_fees_outstanding, 5);
+    assert_eq!(loan.remaining_balance, DEFAULT_TOTAL_DUE + 5);
+}
+
+#[test]
+fn test_apply_late_fees_accumulates_over_multiple_days() {
+    // 3 days overdue → fee = 1050 * 50 * 3 / 10_000 = 15
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 1_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + 3 * SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.late_fees_outstanding, 15);
+    assert_eq!(loan.remaining_balance, DEFAULT_TOTAL_DUE + 15);
+}
+
+#[test]
+fn test_apply_late_fees_is_noop_within_same_day() {
+    // Calling apply_late_fees twice within the same day must not double-count
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 1_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+
+    // Second call within the same second — no additional day has elapsed
+    t.client.apply_late_fees(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.late_fees_outstanding, 5); // still just 1 day
+}
+
+#[test]
+fn test_apply_late_fees_incremental_across_two_calls() {
+    // Day 1 call then day 2 call should each contribute one day's fee
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 0_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    // due_date == 0, so it's already overdue at creation time; first day starts at ledger 0
+    // Advance ledger to 1 so due_date < now and create the loan
+    t.env.ledger().set_timestamp(1);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    // First accrual: 1 day after due_date (due_date = 0, now = SECONDS_PER_DAY)
+    t.env.ledger().set_timestamp(SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+    let after_day1 = t.client.get_loan(&loan_id).late_fees_outstanding;
+
+    // Second accrual: another full day later
+    t.env.ledger().set_timestamp(2 * SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+    let after_day2 = t.client.get_loan(&loan_id).late_fees_outstanding;
+
+    // Day 1 fee: 1050 * 50 / 10_000 = 5
+    // Day 2 fee is on the new balance (1055): 1055 * 50 / 10_000 = 5 (integer division)
+    assert_eq!(after_day1, 5);
+    assert!(after_day2 > after_day1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")] // LoanNotActive
+fn test_apply_late_fees_on_paid_loan_fails() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let loan_id = t.create_default_loan(&user, &merchant);
+
+    t.mint(&user, DEFAULT_TOTAL_DUE);
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
+
+    // Past due date — but loan is already Paid; should reject
+    t.env.ledger().set_timestamp(100_000);
+    t.client.apply_late_fees(&loan_id);
+}
+
+#[test]
+fn test_repay_loan_auto_accrues_late_fees() {
+    // repay_loan must accrue outstanding late fees before processing payment
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 1_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    // Advance 1 day past due_date and attempt partial payment
+    t.env.ledger().set_timestamp(due_date + SECONDS_PER_DAY);
+    // fee = 5; provide enough to cover only the original balance
+    t.mint(&user, DEFAULT_TOTAL_DUE);
+    // Pay only the original balance — should leave late fees outstanding
+    t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
+
+    let loan = t.client.get_loan(&loan_id);
+    // Loan is still Active: original balance paid but late fees remain
+    assert_eq!(loan.status, LoanStatus::Active);
+    assert_eq!(loan.late_fees_outstanding, 5);
+    assert_eq!(loan.remaining_balance, 5);
+}
+
+#[test]
+fn test_full_repayment_including_late_fees_sets_paid() {
+    // Borrower paying remaining_balance after late-fee accrual closes the loan
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 1_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    t.env.ledger().set_timestamp(due_date + SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+
+    let loan = t.client.get_loan(&loan_id);
+    let total_due = loan.remaining_balance; // DEFAULT_TOTAL_DUE + 5
+
+    t.mint(&user, total_due);
+    t.client.repay_loan(&user, &loan_id, &total_due);
+
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.remaining_balance, 0);
+    assert_eq!(loan.late_fees_outstanding, 0);
+}
+
+#[test]
+fn test_active_debt_includes_late_fees() {
+    // apply_late_fees must increase the borrower's active debt by the fee amount
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    let due_date = 1_000_u64;
+    let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
+    t.env.ledger().set_timestamp(0);
+    t.mint(&user, DEFAULT_GUARANTEE);
+    let loan_id = t
+        .client
+        .create_loan(&user, &merchant, &DEFAULT_PRINCIPAL, &DEFAULT_GUARANTEE, &schedule);
+
+    let debt_before = t.client.get_user_active_debt(&user);
+
+    t.env.ledger().set_timestamp(due_date + SECONDS_PER_DAY);
+    t.client.apply_late_fees(&loan_id);
+
+    let debt_after = t.client.get_user_active_debt(&user);
+    assert_eq!(debt_after, debt_before + 5);
+}

@@ -349,6 +349,8 @@ impl CreditLineContract {
             status,
             created_at: env.ledger().timestamp(),
             funded_at: 0,
+            late_fees_outstanding: 0,
+            late_fee_accrual_timestamp: 0,
         }
     }
 
@@ -492,12 +494,21 @@ impl CreditLineContract {
             panic_with_error!(&env, CreditLineError::LoanNotActive);
         }
 
+        // Accrue any outstanding late fees before validating the payment amount so
+        // the borrower repays the true current balance (principal + interest + fees + late fees).
+        let accrued_fee = Self::accrue_late_fees_internal(&env, &mut loan);
+        if accrued_fee > 0 {
+            storage::increase_user_active_debt(&env, &borrower, accrued_fee);
+            events::emit_late_fee_accrued(&env, &borrower, loan_id, accrued_fee, loan.remaining_balance);
+        }
+
         if amount <= 0 || amount > loan.remaining_balance {
             panic_with_error!(&env, CreditLineError::InvalidRepaymentAmount);
         }
 
         Self::enter_non_reentrant(&env);
 
+        // Payment priority: principal → interest → service fee → late fees
         let principal_paid = amount.min(loan.principal_outstanding);
         let after_principal = amount
             .checked_sub(principal_paid)
@@ -507,6 +518,10 @@ impl CreditLineContract {
             .checked_sub(interest_paid)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
         let fee_paid = after_interest.min(loan.service_fee_outstanding);
+        let after_fee = after_interest
+            .checked_sub(fee_paid)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
+        let late_fee_paid = after_fee.min(loan.late_fees_outstanding);
 
         loan.principal_outstanding = loan
             .principal_outstanding
@@ -519,6 +534,10 @@ impl CreditLineContract {
         loan.service_fee_outstanding = loan
             .service_fee_outstanding
             .checked_sub(fee_paid)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
+        loan.late_fees_outstanding = loan
+            .late_fees_outstanding
+            .checked_sub(late_fee_paid)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
 
         let new_balance = loan
@@ -550,6 +569,7 @@ impl CreditLineContract {
             &principal_paid,
             &interest_paid
                 .checked_add(fee_paid)
+                .and_then(|v| v.checked_add(late_fee_paid))
                 .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Overflow)),
         );
 
@@ -584,6 +604,110 @@ impl CreditLineContract {
 
         Self::exit_non_reentrant(&env);
         new_balance
+    }
+
+    /// Accrue late fees for a loan and update the caller-supplied `loan` in place.
+    ///
+    /// Fees are calculated as `remaining_balance × LATE_FEE_BPS_PER_DAY × days_overdue`
+    /// starting from the earliest overdue installment due date (or the previous accrual
+    /// timestamp, whichever is later). Only complete days are counted; any partial day
+    /// carries over to the next accrual.
+    ///
+    /// Returns the newly accrued fee amount (0 if nothing was due).
+    fn accrue_late_fees_internal(env: &Env, loan: &mut Loan) -> i128 {
+        let now = env.ledger().timestamp();
+
+        // Find the earliest overdue installment due date.
+        let mut overdue_since: Option<u64> = None;
+        for installment in loan.repayment_schedule.iter() {
+            if installment.due_date < now {
+                overdue_since = Some(match overdue_since {
+                    None => installment.due_date,
+                    Some(d) => {
+                        if installment.due_date < d {
+                            installment.due_date
+                        } else {
+                            d
+                        }
+                    }
+                });
+            }
+        }
+
+        let overdue_since = match overdue_since {
+            Some(d) => d,
+            None => return 0, // no overdue installments
+        };
+
+        // Accrue from the later of (first overdue date, last accrual timestamp).
+        let accrual_start = if loan.late_fee_accrual_timestamp == 0 {
+            overdue_since
+        } else if loan.late_fee_accrual_timestamp > overdue_since {
+            loan.late_fee_accrual_timestamp
+        } else {
+            overdue_since
+        };
+
+        if now <= accrual_start {
+            return 0;
+        }
+
+        let seconds_elapsed = now - accrual_start;
+        let days_elapsed = (seconds_elapsed / types::SECONDS_PER_DAY) as i128;
+
+        if days_elapsed == 0 {
+            return 0; // less than one full day has passed since last accrual
+        }
+
+        let fee = loan
+            .remaining_balance
+            .checked_mul(types::LATE_FEE_BPS_PER_DAY)
+            .and_then(|v| v.checked_mul(days_elapsed))
+            .and_then(|v| v.checked_div(types::BPS_DENOMINATOR))
+            .unwrap_or(0);
+
+        if fee == 0 {
+            return 0;
+        }
+
+        // Advance the accrual cursor by only complete days to avoid losing fractions.
+        loan.late_fee_accrual_timestamp =
+            accrual_start + (days_elapsed as u64) * types::SECONDS_PER_DAY;
+
+        loan.late_fees_outstanding = loan
+            .late_fees_outstanding
+            .checked_add(fee)
+            .unwrap_or(loan.late_fees_outstanding);
+        loan.remaining_balance = loan
+            .remaining_balance
+            .checked_add(fee)
+            .unwrap_or(loan.remaining_balance);
+
+        fee
+    }
+
+    /// Apply late fees to an active loan without requiring a repayment.
+    ///
+    /// Anyone may call this to trigger fee accrual on an overdue loan.  Emits a
+    /// `LOANLTFE` event when fees are accrued; is a no-op when no full day has
+    /// elapsed since the last accrual or when no installment is overdue.
+    pub fn apply_late_fees(env: Env, loan_id: u64) {
+        let mut loan = storage::read_loan(&env, loan_id)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::LoanNotFound));
+
+        if loan.status != LoanStatus::Active {
+            panic_with_error!(&env, CreditLineError::LoanNotActive);
+        }
+
+        let accrued_fee = Self::accrue_late_fees_internal(&env, &mut loan);
+
+        if accrued_fee == 0 {
+            return;
+        }
+
+        storage::increase_user_active_debt(&env, &loan.borrower, accrued_fee);
+        storage::write_loan(&env, &loan);
+        events::emit_late_fee_accrued(&env, &loan.borrower, loan_id, accrued_fee, loan.remaining_balance);
     }
 
     fn get_protocol_parameters(env: &Env) -> ProtocolParameters {
