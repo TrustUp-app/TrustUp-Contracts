@@ -636,17 +636,41 @@ impl CreditLineContract {
         if is_fully_repaid {
             if let Some(reputation_contract) = storage::get_reputation_contract(&env) {
                 let updater = env.current_contract_address();
-                let params = Self::get_protocol_parameters(&env);
-                let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+                let payment_date = env.ledger().timestamp();
+                let due_date = loan
+                    .repayment_schedule
+                    .last()
+                    .map(|i| i.due_date)
+                    .unwrap_or(0);
+                Self::handle_reputation_increase(
+                    &env,
                     &reputation_contract,
-                    &Symbol::new(&env, "increase_score"),
-                    (updater, borrower, params.full_repayment_reward).into_val(&env),
+                    &updater,
+                    &borrower,
+                    payment_date,
+                    due_date,
                 );
             }
         }
 
         Self::exit_non_reentrant(&env);
         new_balance
+    }
+
+    fn handle_reputation_increase(
+        env: &Env,
+        reputation_contract: &Address,
+        updater: &Address,
+        borrower: &Address,
+        payment_date: u64,
+        due_date: u64,
+    ) {
+        let score_increase: u32 = if payment_date < due_date { 15 } else { 10 };
+        let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            reputation_contract,
+            &Symbol::new(env, "increase_score"),
+            (updater, borrower, score_increase).into_val(env),
+        );
     }
 
     fn get_protocol_parameters(env: &Env) -> ProtocolParameters {
