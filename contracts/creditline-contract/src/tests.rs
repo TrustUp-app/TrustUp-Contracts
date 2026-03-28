@@ -2181,6 +2181,7 @@ fn test_no_late_fee_before_due_date() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     t.env.ledger().set_timestamp(1_000);
     let due_date = 50_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
@@ -2201,6 +2202,7 @@ fn test_apply_late_fees_adds_fee_after_one_day_overdue() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 1_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
@@ -2226,6 +2228,7 @@ fn test_apply_late_fees_accumulates_over_multiple_days() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 1_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
@@ -2249,6 +2252,7 @@ fn test_apply_late_fees_is_noop_within_same_day() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 1_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
@@ -2274,6 +2278,7 @@ fn test_apply_late_fees_incremental_across_two_calls() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 0_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
@@ -2324,6 +2329,7 @@ fn test_repay_loan_auto_accrues_late_fees() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 1_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
@@ -2353,6 +2359,7 @@ fn test_full_repayment_including_late_fees_sets_paid() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 1_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
@@ -2383,6 +2390,7 @@ fn test_active_debt_includes_late_fees() {
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
+    t.register_merchant(&merchant, "Test Merchant");
     let due_date = 1_000_u64;
     let schedule = t.single_installment(DEFAULT_TOTAL_DUE, due_date);
     t.env.ledger().set_timestamp(0);
