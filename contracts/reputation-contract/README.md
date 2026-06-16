@@ -100,3 +100,4 @@ This contract uses Soroban's native authorization system. Each protected functio
 - Updater functions require updater authorization
 - Initialization allows setting admin without prior auth
 
+
