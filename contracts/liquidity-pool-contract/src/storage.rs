@@ -10,9 +10,31 @@ pub const CREDITLINE_KEY: Symbol = symbol_short!("CRDTLIN");
 pub const TREASURY_KEY: Symbol = symbol_short!("TREASURY");
 pub const MERCHANT_FUND_KEY: Symbol = symbol_short!("MRCHFND");
 pub const REENTRANCY_LOCK_KEY: Symbol = symbol_short!("LOCKED");
+pub const PAUSED_KEY: Symbol = symbol_short!("PAUSED");
 
 // Persistent storage key prefix for LP shares
 pub const LP_SHARES_PREFIX: Symbol = symbol_short!("LPSHRS");
+
+// TTL constants (~30 days at 5 s/ledger)
+const INSTANCE_BUMP_AMOUNT: u32 = 518_400;
+const INSTANCE_LIFETIME_THRESHOLD: u32 = 259_200;
+const PERSISTENT_BUMP_AMOUNT: u32 = 518_400;
+const PERSISTENT_LIFETIME_THRESHOLD: u32 = 259_200;
+
+pub fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
+
+pub fn bump_lp_shares(env: &Env, provider: &Address) {
+    env.storage().persistent().extend_ttl(
+        &(LP_SHARES_PREFIX, provider.clone()),
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
+}
+
 
 // --- Admin ---
 
@@ -136,4 +158,15 @@ pub fn is_reentrancy_locked(env: &Env) -> bool {
 
 pub fn set_reentrancy_locked(env: &Env, locked: bool) {
     env.storage().instance().set(&REENTRANCY_LOCK_KEY, &locked);
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&PAUSED_KEY)
+        .unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&PAUSED_KEY, &paused);
 }

@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env};
 
+mod access;
 mod errors;
 mod events;
 mod storage;
@@ -48,31 +49,46 @@ impl LiquidityPoolContract {
 
     pub fn set_creditline(env: Env, admin: Address, creditline: Address) {
         admin.require_auth();
-        Self::require_admin(&env, &admin);
+        access::require_admin(&env, &admin);
         storage::set_creditline(&env, &creditline);
     }
 
     pub fn set_treasury(env: Env, admin: Address, treasury: Address) {
         admin.require_auth();
-        Self::require_admin(&env, &admin);
+        access::require_admin(&env, &admin);
         storage::set_treasury(&env, &treasury);
     }
 
     pub fn set_merchant_fund(env: Env, admin: Address, merchant_fund: Address) {
         admin.require_auth();
-        Self::require_admin(&env, &admin);
+        access::require_admin(&env, &admin);
         storage::set_merchant_fund(&env, &merchant_fund);
     }
 
-    pub fn set_admin(env: Env, new_admin: Address) {
-        let old_admin = storage::get_admin(&env);
-        old_admin.require_auth();
-        Self::require_admin(&env, &old_admin);
+    pub fn set_admin(env: Env, admin: Address, new_admin: Address) {
+        admin.require_auth();
+        access::require_admin(&env, &admin);
         storage::set_admin(&env, &new_admin);
     }
 
     pub fn get_admin(env: Env) -> Address {
         storage::get_admin(&env)
+    }
+
+    pub fn pause(env: Env, admin: Address) {
+        admin.require_auth();
+        access::require_admin(&env, &admin);
+        storage::set_paused(&env, true);
+    }
+
+    pub fn unpause(env: Env, admin: Address) {
+        admin.require_auth();
+        access::require_admin(&env, &admin);
+        storage::set_paused(&env, false);
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
     }
 
     // -------------------------------------------------------------------------
@@ -87,8 +103,9 @@ impl LiquidityPoolContract {
     /// Returns the number of shares issued.
     pub fn deposit(env: Env, provider: Address, amount: i128) -> i128 {
         provider.require_auth();
+        Self::require_not_paused(&env);
 
-        if amount <= 0 {
+        if amount < types::MIN_AMOUNT {
             panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
         }
 
@@ -119,6 +136,7 @@ impl LiquidityPoolContract {
             .checked_add(shares_issued)
             .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow));
         storage::set_lp_shares(&env, &provider, new_shares);
+        storage::bump_lp_shares(&env, &provider);
 
         let new_total_shares = total_shares
             .checked_add(shares_issued)
@@ -135,6 +153,7 @@ impl LiquidityPoolContract {
         token_client.transfer(&provider, &env.current_contract_address(), &amount);
 
         events::emit_liquidity_deposited(&env, &provider, amount, shares_issued);
+        storage::bump_instance(&env);
         Self::exit_non_reentrant(&env);
 
         shares_issued
@@ -147,6 +166,7 @@ impl LiquidityPoolContract {
     /// Returns the number of tokens returned.
     pub fn withdraw(env: Env, provider: Address, shares: i128) -> i128 {
         provider.require_auth();
+        Self::require_not_paused(&env);
 
         if shares <= 0 {
             panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
@@ -185,6 +205,7 @@ impl LiquidityPoolContract {
             .checked_sub(shares)
             .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Underflow));
         storage::set_lp_shares(&env, &provider, new_provider_shares);
+        storage::bump_lp_shares(&env, &provider);
 
         let new_total_shares = total_shares
             .checked_sub(shares)
@@ -201,6 +222,7 @@ impl LiquidityPoolContract {
         let token = storage::get_token(&env);
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&env.current_contract_address(), &provider, &amount_returned);
+        storage::bump_instance(&env);
         Self::exit_non_reentrant(&env);
 
         amount_returned
@@ -214,7 +236,8 @@ impl LiquidityPoolContract {
     /// Only the registered CreditLine contract may call this.
     pub fn fund_loan(env: Env, creditline: Address, merchant: Address, amount: i128) {
         creditline.require_auth();
-        Self::require_creditline(&env, &creditline);
+        access::require_creditline(&env, &creditline);
+        Self::require_not_paused(&env);
 
         if amount <= 0 {
             panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
@@ -252,7 +275,8 @@ impl LiquidityPoolContract {
     /// `interest`  is distributed via `distribute_interest` (increases pool value).
     pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128) {
         creditline.require_auth();
-        Self::require_creditline(&env, &creditline);
+        access::require_creditline(&env, &creditline);
+        Self::require_not_paused(&env);
 
         if principal < 0 || interest < 0 {
             panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
@@ -292,7 +316,8 @@ impl LiquidityPoolContract {
     /// and reduces locked_liquidity by the same amount (partial recovery).
     pub fn receive_guarantee(env: Env, creditline: Address, amount: i128) {
         creditline.require_auth();
-        Self::require_creditline(&env, &creditline);
+        access::require_creditline(&env, &creditline);
+        Self::require_not_paused(&env);
 
         if amount <= 0 {
             panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
@@ -317,9 +342,10 @@ impl LiquidityPoolContract {
 
         let token = storage::get_token(&env);
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&creditline, &env.current_contract_address(), &amount);
+        // Transfer only the recovered amount — keeps accounting consistent (H-3).
+        token_client.transfer(&creditline, &env.current_contract_address(), &recovered);
 
-        events::emit_guarantee_received(&env, &creditline, amount);
+        events::emit_guarantee_received(&env, &creditline, recovered);
         Self::exit_non_reentrant(&env);
     }
 
@@ -327,20 +353,18 @@ impl LiquidityPoolContract {
     // Interest Distribution (SC-17 core feature)
     // -------------------------------------------------------------------------
 
-    /// Distribute `interest_amount` according to the protocol fee split:
-    ///   - 85 % → Liquidity Providers  (increases share value by raising `total_liquidity`)
-    ///   - 10 % → Protocol Treasury
-    ///   -  5 % → Merchant Incentive Fund
-    ///
-    /// The LP portion is NOT transferred out; it stays in the pool and inflates
-    /// the share price (existing LP shares become worth more).
-    ///
-    /// This function is called internally by `receive_repayment`, but it is also
-    /// `pub` so that the CreditLine (or admin, in edge-case) can call it directly.
-    pub fn distribute_interest(env: &Env, interest_amount: i128) {
-        Self::enter_non_reentrant(env);
-        Self::distribute_interest_internal(env, interest_amount);
-        Self::exit_non_reentrant(env);
+    /// Distribute interest. Only the registered CreditLine or admin may call this.
+    pub fn distribute_interest(env: Env, caller: Address, interest_amount: i128) {
+        caller.require_auth();
+        Self::require_not_paused(&env);
+        let is_admin = storage::get_admin(&env) == caller;
+        let is_creditline = storage::get_creditline(&env).map_or(false, |cl| cl == caller);
+        if !is_admin && !is_creditline {
+            panic_with_error!(&env, LiquidityPoolError::NotCreditLine);
+        }
+        Self::enter_non_reentrant(&env);
+        Self::distribute_interest_internal(&env, interest_amount);
+        Self::exit_non_reentrant(&env);
     }
 
     fn distribute_interest_internal(env: &Env, interest_amount: i128) {
@@ -436,6 +460,7 @@ impl LiquidityPoolContract {
     }
 
     pub fn get_lp_shares(env: Env, provider: Address) -> i128 {
+        storage::bump_lp_shares(&env, &provider);
         storage::get_lp_shares(&env, &provider)
     }
 
@@ -452,22 +477,29 @@ impl LiquidityPoolContract {
             .unwrap_or(0)
     }
 
+    pub fn get_token(env: Env) -> Address {
+        storage::get_token(&env)
+    }
+
+    pub fn get_treasury(env: Env) -> Option<Address> {
+        storage::get_treasury(&env)
+    }
+
+    pub fn get_merchant_fund(env: Env) -> Option<Address> {
+        storage::get_merchant_fund(&env)
+    }
+
+    pub fn get_creditline(env: Env) -> Option<Address> {
+        storage::get_creditline(&env)
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
 
-    fn require_admin(env: &Env, caller: &Address) {
-        let admin = storage::get_admin(env);
-        if admin != *caller {
-            panic_with_error!(env, LiquidityPoolError::NotAdmin);
-        }
-    }
-
-    fn require_creditline(env: &Env, caller: &Address) {
-        let creditline = storage::get_creditline(env)
-            .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::NotCreditLine));
-        if creditline != *caller {
-            panic_with_error!(env, LiquidityPoolError::NotCreditLine);
+    fn require_not_paused(env: &Env) {
+        if storage::is_paused(env) {
+            panic_with_error!(env, LiquidityPoolError::ContractPaused);
         }
     }
 
