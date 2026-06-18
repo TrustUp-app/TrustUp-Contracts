@@ -1669,7 +1669,7 @@ fn test_active_merchant_can_receive_loan() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #3)")] // InvalidMerchant
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_inactive_merchant_loan_is_rejected() {
     // A merchant that is registered but set to inactive must fail
     let t = TestCtx::setup();
@@ -1692,12 +1692,12 @@ fn test_inactive_merchant_loan_is_rejected() {
         (&t.admin, &inactive_merchant).into_val(&t.env),
     );
 
-    // This should panic with InvalidMerchant error
+    // This should panic with MerchantNotActive
     let _ = t.create_default_loan(&user, &inactive_merchant);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #3)")] // InvalidMerchant
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_unregistered_merchant_loan_is_rejected() {
     // A merchant address unknown to the registry must fail
     let t = TestCtx::setup();
@@ -1708,10 +1708,51 @@ fn test_unregistered_merchant_loan_is_rejected() {
     let due_date = t.env.ledger().timestamp() + 10_000;
     let schedule = t.single_installment(1000, due_date);
 
-    // This should panic with InvalidMerchant error
+    // This should panic with MerchantNotActive
     let _ = t
         .client
         .create_loan(&user, &unknown_merchant, &1000, &200, &schedule);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #16)")]
+fn test_missing_merchant_registry_rejects_loan() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.env.as_contract(&t.client.address, || {
+        t.env
+            .storage()
+            .instance()
+            .remove(&crate::storage::MERCHANT_REGISTRY);
+    });
+
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(1000, due_date);
+
+    let _ = t
+        .client
+        .create_loan(&user, &merchant, &1000, &200, &schedule);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")]
+fn test_invalid_merchant_registry_rejects_loan() {
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let invalid_registry = t.env.register(MockReputation, ());
+
+    t.client
+        .set_merchant_registry(&t.admin, &invalid_registry);
+
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(1000, due_date);
+
+    let _ = t
+        .client
+        .create_loan(&user, &merchant, &1000, &200, &schedule);
 }
 
 // ─── liquidity pool integration — TDD stubs (Phase 6) ────────────────────────
