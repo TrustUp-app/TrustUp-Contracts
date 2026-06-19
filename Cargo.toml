@@ -9,9 +9,6 @@ members = [
 ]
 resolver = "2"
 
-# Future contracts:
-# - contracts/adapter-trustless-contract
-
 [profile.release]
 opt-level = "z"
 overflow-checks = true
