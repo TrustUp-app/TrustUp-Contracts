@@ -8,9 +8,10 @@ use reputation_contract::{ReputationContract, ReputationContractClient};
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{
     contract, contractimpl,
+    symbol_short,
     testutils::{Address as _, Events, Ledger},
     token::Client as TokenClient,
-    Address, Env, String as SorobanString,
+    Address, Env, String as SorobanString, Symbol, Val,
 };
 
 const DEFAULT_PRINCIPAL: i128 = 1_000;
@@ -1551,7 +1552,7 @@ fn test_partial_repayment_reduces_remaining_balance() {
 }
 
 #[test]
-fn test_full_repayment_sets_status_to_paid() {
+fn test_full_repayment_sets_status_to_repaid() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
@@ -1562,7 +1563,7 @@ fn test_full_repayment_sets_status_to_paid() {
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
     let loan = t.client.get_loan(&loan_id);
     assert_eq!(loan.remaining_balance, 0);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
 }
 
 #[test]
@@ -1627,7 +1628,7 @@ fn test_full_repayment_triggers_reputation_increase() {
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
 }
 
 #[test]
@@ -1651,7 +1652,7 @@ fn test_early_repayment_triggers_bonus_reputation_increase() {
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
 }
 
 // ─── merchant validation ─────────────────────────────────────────────────────
@@ -1882,7 +1883,7 @@ fn test_multiple_independent_loans_do_not_interfere() {
 
 #[test]
 fn test_complete_lifecycle_create_repay_complete() {
-    // Verifies the full happy path: Active → repaid in full → Paid
+    // Verifies the full happy path: Active → repaid in full → Repaid
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
@@ -1896,9 +1897,9 @@ fn test_complete_lifecycle_create_repay_complete() {
 
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
-    let paid = t.client.get_loan(&loan_id);
-    assert_eq!(paid.status, LoanStatus::Paid);
-    assert_eq!(paid.remaining_balance, 0);
+    let repaid = t.client.get_loan(&loan_id);
+    assert_eq!(repaid.status, LoanStatus::Repaid);
+    assert_eq!(repaid.remaining_balance, 0);
 }
 
 #[test]
@@ -1917,7 +1918,7 @@ fn test_multi_contract_integration_full_flow() {
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
 
     // TODO: assert reputation score increased for `user`
     // TODO: assert liquidity pool received the repayment
@@ -1950,7 +1951,7 @@ fn test_repayment_on_defaulted_loan_is_rejected() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #7)")] // LoanNotActive
-fn test_repayment_on_already_paid_loan_is_rejected() {
+fn test_repayment_on_already_repaid_loan_is_rejected() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
@@ -1961,7 +1962,7 @@ fn test_repayment_on_already_paid_loan_is_rejected() {
     // Pay in full first
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
-    // Second repayment attempt must fail — loan is now Paid
+    // Second repayment attempt must fail — loan is now Repaid
     t.client.repay_loan(&user, &loan_id, &1);
 }
 
@@ -2003,7 +2004,7 @@ fn test_multiple_partial_repayments_accumulate_correctly() {
 
     assert_eq!(remaining, 0);
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
     assert_eq!(loan.remaining_balance, 0);
 }
 
@@ -2019,10 +2020,31 @@ fn test_repay_loan_emits_event() {
     t.client.repay_loan(&user, &loan_id, &500);
 
     let events = t.env.events().all();
-    assert!(
-        !events.is_empty(),
-        "Expected a LoanRepaid event to be emitted"
-    );
+
+    let mut found_event = false;
+    for event in events.iter() {
+        let topics = event.1.clone();
+        let event_type: Symbol = topics.get(0).unwrap().into_val(&t.env);
+
+        if event_type == symbol_short!("LOANRPD") {
+            found_event = true;
+
+            let event_borrower: Address = topics.get(1).unwrap().into_val(&t.env);
+            let event_loan_id: u64 = topics.get(2).unwrap().into_val(&t.env);
+            assert_eq!(event_borrower, user);
+            assert_eq!(event_loan_id, loan_id);
+
+            let data_tuple: (i128, i128, bool, u64) = event.2.into_val(&t.env);
+            let (amount_paid, remaining_balance, is_fully_repaid, _) = data_tuple;
+
+            assert_eq!(amount_paid, 500);
+            assert_eq!(remaining_balance, DEFAULT_TOTAL_DUE - 500);
+            assert!(!is_fully_repaid);
+            break;
+        }
+    }
+
+    assert!(found_event, "LOANRPD event not found");
 }
 
 #[test]
@@ -2310,7 +2332,7 @@ fn test_real_asset_transfers_on_create_and_repay() {
     );
 
     let loan = t.creditline.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
     assert_eq!(loan.remaining_balance, 0);
 }
 
@@ -2368,7 +2390,7 @@ fn test_end_to_end_happy_path_across_all_contracts() {
     t.creditline.repay_loan(&user, &loan_id, &total_due);
 
     let loan = t.creditline.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
     assert_eq!(t.reputation.get_score(&user), 95); // early repayment: +15 (80 → 95)
 
     t.mint(&t.creditline_id, 100);
@@ -2577,7 +2599,7 @@ fn test_apply_late_fees_incremental_across_two_calls() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #7)")] // LoanNotActive
-fn test_apply_late_fees_on_paid_loan_fails() {
+fn test_apply_late_fees_on_repaid_loan_fails() {
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
@@ -2586,7 +2608,7 @@ fn test_apply_late_fees_on_paid_loan_fails() {
     t.mint(&user, DEFAULT_TOTAL_DUE);
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
-    // Past due date — but loan is already Paid; should reject
+    // Past due date — but loan is already Repaid; should reject
     t.env.ledger().set_timestamp(100_000);
     t.client.apply_late_fees(&loan_id);
 }
@@ -2626,7 +2648,7 @@ fn test_repay_loan_auto_accrues_late_fees() {
 }
 
 #[test]
-fn test_full_repayment_including_late_fees_sets_paid() {
+fn test_full_repayment_including_late_fees_sets_repaid() {
     // Borrower paying remaining_balance after late-fee accrual closes the loan
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
@@ -2655,7 +2677,7 @@ fn test_full_repayment_including_late_fees_sets_paid() {
     t.client.repay_loan(&user, &loan_id, &total_due);
 
     let loan = t.client.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
     assert_eq!(loan.remaining_balance, 0);
     assert_eq!(loan.late_fees_outstanding, 0);
 }
@@ -2782,7 +2804,7 @@ fn test_partial_repayment_does_not_change_reputation_score() {
 fn test_reputation_call_failure_does_not_block_repayment() {
     // Even if the reputation contract call fails, the loan repayment must succeed
     // We verify this by removing the creditline as a reputation updater and
-    // confirming the loan still moves to Paid status.
+    // confirming the loan still moves to Repaid status.
     let t = RealIntegrationCtx::setup();
     let provider = Address::generate(&t.env);
     let user = Address::generate(&t.env);
@@ -2810,7 +2832,7 @@ fn test_reputation_call_failure_does_not_block_repayment() {
     t.creditline.repay_loan(&user, &loan_id, &total_due);
 
     let loan = t.creditline.get_loan(&loan_id);
-    assert_eq!(loan.status, LoanStatus::Paid);
+    assert_eq!(loan.status, LoanStatus::Repaid);
     assert_eq!(loan.remaining_balance, 0);
     // Score unchanged because the call was silently ignored
     assert_eq!(t.reputation.get_score(&user), 60);
