@@ -617,7 +617,7 @@ impl CreditLineContract {
         loan.remaining_balance = new_balance;
         let is_fully_repaid = new_balance == 0;
         if is_fully_repaid {
-            loan.status = LoanStatus::Paid;
+            loan.status = LoanStatus::Repaid;
         }
 
         storage::decrease_user_active_debt(&env, &borrower, amount);

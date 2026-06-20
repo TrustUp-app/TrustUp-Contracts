@@ -7,7 +7,7 @@ use soroban_sdk::{contracttype, Address};
 pub enum LoanStatus {
     Pending,
     Active,
-    Paid,
+    Repaid,
     Defaulted,
     Cancelled,
 }
