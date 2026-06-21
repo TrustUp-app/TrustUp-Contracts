@@ -2448,3 +2448,84 @@ fn test_receive_guarantee_blocked_when_paused() {
     t.mint(&t.creditline, 100);
     t.client().receive_guarantee(&t.creditline, &100);
 }
+
+// ─── distribute_interest public entrypoint (SC-17) ───────────────────────────
+
+#[test]
+fn test_distribute_interest_called_by_admin_splits_fees_correctly() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 10_000);
+    t.client().deposit(&provider, &10_000);
+
+    t.mint(&t.contract_id, 1_000);
+    t.client().distribute_interest(&t.admin, &1_000);
+
+    let stats = t.client().get_pool_stats();
+    assert_eq!(stats.total_liquidity, 10_850);
+    assert_eq!(t.token().balance(&t.treasury), 100);
+    assert_eq!(t.token().balance(&t.merchant_fund), 50);
+}
+
+#[test]
+fn test_distribute_interest_called_by_creditline_splits_fees_correctly() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 5_000);
+    t.client().deposit(&provider, &5_000);
+
+    t.mint(&t.contract_id, 200);
+    t.client().distribute_interest(&t.creditline, &200);
+
+    let stats = t.client().get_pool_stats();
+    assert_eq!(stats.total_liquidity, 5_170);
+    assert_eq!(t.token().balance(&t.treasury), 20);
+    assert_eq!(t.token().balance(&t.merchant_fund), 10);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_distribute_interest_unauthorized_caller_fails() {
+    let t = TestEnv::setup();
+    let intruder = Address::generate(&t.env);
+    t.client().distribute_interest(&intruder, &100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_distribute_interest_zero_amount_fails() {
+    let t = TestEnv::setup();
+    t.client().distribute_interest(&t.admin, &0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_distribute_interest_negative_amount_fails() {
+    let t = TestEnv::setup();
+    t.client().distribute_interest(&t.admin, &-500);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")]
+fn test_distribute_interest_blocked_when_paused() {
+    let t = TestEnv::setup();
+    t.client().pause(&t.admin);
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.admin, &100);
+}
+
+#[test]
+fn test_distribute_interest_admin_and_creditline_both_authorized() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 10_000);
+    t.client().deposit(&provider, &10_000);
+
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.admin, &100);
+    assert_eq!(t.client().get_pool_stats().total_liquidity, 10_085);
+
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.creditline, &100);
+    assert_eq!(t.client().get_pool_stats().total_liquidity, 10_170);
+}
