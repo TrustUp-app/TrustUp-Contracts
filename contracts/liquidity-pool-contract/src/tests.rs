@@ -2529,3 +2529,85 @@ fn test_distribute_interest_admin_and_creditline_both_authorized() {
     t.client().distribute_interest(&t.creditline, &100);
     assert_eq!(t.client().get_pool_stats().total_liquidity, 10_170);
 }
+
+#[test]
+fn test_distribute_interest_increases_share_price() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+
+    let before = t.client().get_pool_stats();
+    assert_eq!(before.share_price, 10_000);
+
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.admin, &100);
+
+    let after = t.client().get_pool_stats();
+    // lp_amount = 85 → total_liquidity = 1085 → share_price = 10850 bps
+    assert_eq!(after.share_price, 10_850);
+    assert!(after.share_price > before.share_price);
+}
+
+#[test]
+fn test_distribute_interest_lp_portion_stays_in_pool() {
+    // 85% of interest never leaves the contract — only total_liquidity accounting increases.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 2_000);
+    t.client().deposit(&provider, &2_000);
+
+    t.mint(&t.contract_id, 500);
+
+    let contract_balance_before = t.token().balance(&t.contract_id);
+    t.client().distribute_interest(&t.admin, &500);
+    let contract_balance_after = t.token().balance(&t.contract_id);
+
+    // 85% of 500 = 425 stayed in pool; only 75 (15%) transferred out
+    let lp_amount = 500i128 * 8500 / 10000; // 425
+    let expected_outflow = 500 - lp_amount; // 75
+    assert_eq!(contract_balance_before - contract_balance_after, expected_outflow);
+}
+
+#[test]
+fn test_distribute_interest_multiple_calls_compound_share_value() {
+    // Repeated distribute_interest calls should linearly increase total_liquidity.
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+
+    for _ in 0..3 {
+        t.mint(&t.contract_id, 100);
+        t.client().distribute_interest(&t.admin, &100);
+    }
+
+    // After 3 calls: 1000 + 3*85 = 1255; share_price = 12550
+    let stats = t.client().get_pool_stats();
+    assert_eq!(stats.total_liquidity, 1_255);
+    assert_eq!(stats.share_price, 12_550);
+}
+
+#[test]
+fn test_distribute_interest_proportional_to_multiple_lps() {
+    // Each LP's share value must increase proportionally regardless of
+    // how many providers are in the pool.
+    let t = TestEnv::setup();
+    let provider_a = Address::generate(&t.env);
+    let provider_b = Address::generate(&t.env);
+    let provider_c = Address::generate(&t.env);
+
+    for p in [&provider_a, &provider_b, &provider_c] {
+        t.mint(p, 1_000);
+        t.client().deposit(p, &1_000);
+    }
+
+    // Distribute 300 tokens: lp = 255 stays in pool
+    t.mint(&t.contract_id, 300);
+    t.client().distribute_interest(&t.admin, &300);
+
+    // total_liquidity = 3255, total_shares = 3000
+    // Each LP (1000 shares of 3000): 1000 * 3255 / 3000 = 1085
+    let val = t.client().calculate_withdrawal(&1_000);
+    assert_eq!(val, 1_085);
+}
