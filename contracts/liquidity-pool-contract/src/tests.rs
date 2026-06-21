@@ -1,8 +1,9 @@
 use crate::{LiquidityPoolContract, LiquidityPoolContractClient};
 use soroban_sdk::{
-    testutils::Address as _,
+    symbol_short,
+    testutils::{Address as _, Events},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env,
+    Address, Env, IntoVal, Symbol, Val, Vec,
 };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -2610,4 +2611,51 @@ fn test_distribute_interest_proportional_to_multiple_lps() {
     // Each LP (1000 shares of 3000): 1000 * 3255 / 3000 = 1085
     let val = t.client().calculate_withdrawal(&1_000);
     assert_eq!(val, 1_085);
+}
+
+#[test]
+fn test_distribute_interest_emits_interest_distributed_event() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.admin, &100);
+
+    let events: Vec<(Address, Vec<Val>, Val)> = t.env.events().all();
+    let mut found_event = false;
+    for event in events.iter() {
+        let topics = event.1.clone();
+        if let Some(first) = topics.get(0) {
+            let sym: Symbol = first.into_val(&t.env);
+            if sym == symbol_short!("LQINTDST") {
+                found_event = true;
+                // Verify all four fields: (total, lp, protocol, merchant)
+                let data: (i128, i128, i128, i128) = event.2.into_val(&t.env);
+                assert_eq!(data.0, 100); // total_interest
+                assert_eq!(data.1, 85);  // lp_amount (85%)
+                assert_eq!(data.2, 10);  // protocol_amount (10%)
+                assert_eq!(data.3, 5);   // merchant_amount (5%)
+                break;
+            }
+        }
+    }
+    assert!(found_event, "InterestDistributed (LQINTDST) event must be emitted");
+}
+
+#[test]
+fn test_distribute_interest_rounding_remainder_to_merchant() {
+    // 101 tokens: lp=85 (floor), protocol=10 (floor), merchant=6 (remainder avoids dust)
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 10_000);
+    t.client().deposit(&provider, &10_000);
+
+    t.mint(&t.contract_id, 101);
+    t.client().distribute_interest(&t.admin, &101);
+
+    assert_eq!(t.token().balance(&t.treasury), 10);
+    // remainder = 101 - 85 - 10 = 6 goes to merchant (no dust lost to rounding)
+    assert_eq!(t.token().balance(&t.merchant_fund), 6);
 }
