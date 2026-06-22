@@ -341,7 +341,7 @@ See [ROADMAP.md](./docs/ROADMAP.md) for detailed breakdown.
   <a href="https://github.com/ryzen-xp">
     <img src="https://avatars.githubusercontent.com/u/92181599?v=4" width="100px;" style="border-radius:50%;" alt="ryzen-xp"/><br />
     <sub><b>🥉 @ryzen-xp</b></sub><br />
-    <sub>6 contributions</sub>
+    <sub>8 contributions</sub>
   </a>
 </td>
 
