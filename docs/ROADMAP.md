@@ -508,16 +508,6 @@ Comprehensive test coverage for all contracts.
 
 ---
 
-## Unplanned Contracts
-
-### adapter-trustless-contract
-
-**Status:** Empty (`.gitkeep` only)
-**Purpose:** Unknown — not in original roadmap
-**Action Required:** Clarify scope or remove
-
----
-
 ## Notes
 
 - All completed phases (1-2) have excellent test coverage
