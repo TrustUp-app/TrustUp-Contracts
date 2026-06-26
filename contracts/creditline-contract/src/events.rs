@@ -10,6 +10,8 @@ const LOAN_REPAID: Symbol = symbol_short!("LOANRPD");
 const LOAN_CANCELLED: Symbol = symbol_short!("LOANCNCL");
 const LOAN_LATE_FEE: Symbol = symbol_short!("LOANLTFE");
 const LOAN_GRACE_PERIOD: Symbol = symbol_short!("LOANGRC");
+/// SC-11: emitted after a successful reputation score change triggered by the CreditLine
+const REPUTATION_UPDATED: Symbol = symbol_short!("REPUPD");
 
 /// Emit a loan created event
 pub fn emit_loan_created(
@@ -107,6 +109,15 @@ pub fn emit_late_fee_accrued(
     env.events().publish(
         (LOAN_LATE_FEE, borrower, loan_id),
         (fee_amount, new_remaining_balance, env.ledger().timestamp()),
+    );
+}
+
+/// SC-11: Emitted when CreditLine successfully updates a borrower's reputation score.
+/// `increase` is true for repayment rewards, false for default penalties.
+pub fn emit_reputation_updated(env: &Env, borrower: &Address, score_delta: u32, increase: bool) {
+    env.events().publish(
+        (REPUTATION_UPDATED, borrower),
+        (score_delta, increase, env.ledger().timestamp()),
     );
 }
 
