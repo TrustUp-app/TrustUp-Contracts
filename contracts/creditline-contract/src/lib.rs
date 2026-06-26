@@ -801,12 +801,19 @@ impl CreditLineContract {
         payment_date: u64,
         due_date: u64,
     ) {
-        let score_increase: u32 = if payment_date < due_date { 15 } else { 10 };
-        let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+        let score_increase: u32 = if payment_date < due_date {
+            types::REPUTATION_INCREMENT_EARLY
+        } else {
+            types::REPUTATION_INCREMENT_ON_TIME
+        };
+        let result = env.try_invoke_contract::<(), soroban_sdk::Error>(
             reputation_contract,
             &Symbol::new(env, "increase_score"),
             (updater, borrower, score_increase).into_val(env),
         );
+        if result.is_ok() {
+            events::emit_reputation_updated(env, borrower, score_increase, true);
+        }
     }
 
     fn get_protocol_parameters(env: &Env) -> ProtocolParameters {
