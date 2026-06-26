@@ -55,3 +55,7 @@ pub const SERVICE_FEE_BPS: i128 = 100; // 1% flat service fee
 pub const BPS_DENOMINATOR: i128 = 10_000;
 pub const LATE_FEE_BPS_PER_DAY: i128 = 50; // 0.5% of remaining balance per overdue day
 pub const SECONDS_PER_DAY: u64 = 86_400;
+
+// SC-11: Reputation score increments awarded on full loan repayment
+pub const REPUTATION_INCREMENT_ON_TIME: u32 = 10; // +10 for on-time or late full repayment
+pub const REPUTATION_INCREMENT_EARLY: u32 = 15; // +15 bonus for repaying before due date
