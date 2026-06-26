@@ -10,7 +10,7 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short,
     testutils::{Address as _, Events, Ledger},
     token::Client as TokenClient,
-    Address, Env, IntoVal, String as SorobanString, Symbol,
+    Address, Env, IntoVal, String as SorobanString, Symbol, Val, Vec,
 };
 
 const DEFAULT_PRINCIPAL: i128 = 1_000;
@@ -1902,25 +1902,24 @@ fn test_complete_lifecycle_create_repay_complete() {
 
 #[test]
 fn test_multi_contract_integration_full_flow() {
-    // End-to-end: reputation check on create → funding → repayment → score boost
+    // End-to-end: reputation check on create → funding → repayment → status Repaid
+    // Uses the mock-based TestCtx; for actual score assertions see RealIntegrationCtx tests.
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
 
-    // 1. Create loan — reputation validated, pool funded
+    // 1. Create loan — reputation validated (mock returns 100), pool funded (mock)
     let loan_id = t.create_default_loan(&user, &merchant);
 
     t.mint(&user, DEFAULT_TOTAL_DUE);
 
-    // 2. Repay in full — pool credited, reputation score increased
+    // 2. Repay in full — pool credited (mock), reputation increase attempted (mock)
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
 
+    // Loan transitions to Repaid with zero balance
     let loan = t.client.get_loan(&loan_id);
     assert_eq!(loan.status, LoanStatus::Repaid);
-
-    // TODO: assert reputation score increased for `user`
-    // TODO: assert liquidity pool received the repayment
-    let _ = loan_id;
+    assert_eq!(loan.remaining_balance, 0);
 }
 
 // ─── repayment — repay_loan implementation tests ─────────────────────────────
@@ -2835,3 +2834,4 @@ fn test_reputation_call_failure_does_not_block_repayment() {
     // Score unchanged because the call was silently ignored
     assert_eq!(t.reputation.get_score(&user), 60);
 }
+
