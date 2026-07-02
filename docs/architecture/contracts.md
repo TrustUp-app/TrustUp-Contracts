@@ -415,3 +415,90 @@ All contracts follow upgrade pattern:
 - [Reputation Contract Source](../../contracts/reputation-contract/src/lib.rs)
 - [Roadmap](../ROADMAP.md) - Implementation timeline
 - [Storage Patterns](storage-patterns.md) - Storage best practices
+
+---
+
+## Adapter Trustless Contract ✅
+
+**Status**: Implemented and tested
+
+**Purpose**: Trustless escrow adapter that holds the borrower's 20% guarantee deposit for the lifetime of a loan and releases or seizes it based on loan outcome.
+
+### Architecture
+
+**State**:
+```rust
+// Instance storage
+Admin      → Address
+CreditLine → Address
+Token      → Address
+
+// Persistent storage
+Escrows    → Map<u64, EscrowEntry>
+```
+
+```rust
+#[contracttype]
+pub struct EscrowEntry {
+    pub borrower: Address,
+    pub amount: i128,
+    pub status: EscrowStatus,  // Locked | Released | Seized
+}
+```
+
+**Public API**:
+```rust
+// Initialisation
+pub fn initialize(env: Env, admin: Address, creditline: Address, token: Address)
+
+// Admin
+pub fn set_admin(env: Env, new_admin: Address)
+pub fn set_creditline(env: Env, admin: Address, creditline: Address)
+
+// Escrow lifecycle (CreditLine-only)
+pub fn lock_guarantee(env: Env, creditline: Address, loan_id: u64, borrower: Address, amount: i128)
+pub fn release_guarantee(env: Env, creditline: Address, loan_id: u64)
+pub fn seize_guarantee(env: Env, creditline: Address, loan_id: u64, pool: Address)
+
+// Queries
+pub fn get_escrow(env: Env, loan_id: u64) -> EscrowEntry
+pub fn get_admin(env: Env) -> Address
+pub fn get_creditline(env: Env) -> Address
+```
+
+**Events**:
+- `ESCRWLCK`: Guarantee locked (`loan_id`, `borrower`, `amount`)
+- `ESCRWRLS`: Guarantee released to borrower (`loan_id`, `borrower`, `amount`)
+- `ESCRWSZD`: Guarantee seized to liquidity pool (`loan_id`, `pool`, `amount`)
+
+**Access Control**:
+
+| Caller     | Allowed operations                                                |
+|------------|-------------------------------------------------------------------|
+| Admin      | `set_admin`, `set_creditline`                                     |
+| CreditLine | `lock_guarantee`, `release_guarantee`, `seize_guarantee`          |
+| Anyone     | `get_escrow`, `get_admin`, `get_creditline`                       |
+
+**Escrow Status Machine**:
+```
+(none) ──lock_guarantee──→ Locked
+Locked ──release_guarantee──→ Released   (repayment success)
+Locked ──seize_guarantee──→ Seized       (default)
+```
+
+**Integration**:
+```
+CreditLine.create_loan()
+    └─→ AdapterTrustless.lock_guarantee(loan_id, borrower, guarantee)
+            └─→ Token.transfer(borrower → adapter)
+
+CreditLine.repay_loan() [fully repaid]
+    └─→ AdapterTrustless.release_guarantee(loan_id)
+            └─→ Token.transfer(adapter → borrower)
+
+CreditLine.mark_defaulted()
+    └─→ AdapterTrustless.seize_guarantee(loan_id, pool)
+            └─→ Token.transfer(adapter → liquidity_pool)
+```
+
+**Design document**: [adapter-trustless-contract-design.md](../adapter-trustless-contract-design.md)

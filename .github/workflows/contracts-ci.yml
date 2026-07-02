@@ -34,6 +34,9 @@ jobs:
     - name: Build WASM
       run: cargo build -p reputation-contract --target wasm32-unknown-unknown --release
 
+    - name: Build adapter-trustless-contract WASM
+      run: cargo build -p adapter-trustless-contract --target wasm32-unknown-unknown --release
+
   test:
     name: Test Contracts
     runs-on: ubuntu-latest
