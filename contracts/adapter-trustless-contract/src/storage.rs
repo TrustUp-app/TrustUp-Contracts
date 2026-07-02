@@ -1,11 +1,11 @@
-use soroban_sdk::{symbol_short, Address, Env, Map, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 use crate::types::EscrowEntry;
 
 pub const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 pub const CREDITLINE_KEY: Symbol = symbol_short!("CREDITLN");
 pub const TOKEN_KEY: Symbol = symbol_short!("TOKEN");
-pub const ESCROWS_KEY: Symbol = symbol_short!("ESCROWS");
+pub const ESCROW_PREFIX: Symbol = symbol_short!("ESCROW");
 
 // --- Admin ---
 
@@ -43,23 +43,12 @@ pub fn set_token(env: &Env, token: &Address) {
 
 // --- Escrow entries ---
 
-fn get_escrows(env: &Env) -> Map<u64, EscrowEntry> {
-    env.storage()
-        .persistent()
-        .get(&ESCROWS_KEY)
-        .unwrap_or_else(|| Map::new(env))
-}
-
-fn save_escrows(env: &Env, map: &Map<u64, EscrowEntry>) {
-    env.storage().persistent().set(&ESCROWS_KEY, map);
-}
-
 pub fn get_escrow(env: &Env, loan_id: u64) -> Option<EscrowEntry> {
-    get_escrows(env).get(loan_id)
+    env.storage().persistent().get(&(ESCROW_PREFIX, loan_id))
 }
 
 pub fn set_escrow(env: &Env, loan_id: u64, entry: &EscrowEntry) {
-    let mut map = get_escrows(env);
-    map.set(loan_id, entry.clone());
-    save_escrows(env, &map);
+    env.storage()
+        .persistent()
+        .set(&(ESCROW_PREFIX, loan_id), entry);
 }

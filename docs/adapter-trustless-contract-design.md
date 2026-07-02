@@ -5,9 +5,10 @@
 The `adapter-trustless-contract` is a **trustless escrow and payment adapter** within the TrustUp BNPL system. It acts as the neutral on-chain intermediary that:
 
 1. Holds the borrower's 20% guarantee deposit during the loan lifecycle
-2. Forwards the remaining 80% purchase funds to the merchant at loan creation
-3. On successful repayment: returns the guarantee to the borrower
-4. On default: forwards the forfeited guarantee to the liquidity pool
+2. On successful repayment: returns the guarantee to the borrower
+3. On default: forwards the forfeited guarantee to the liquidity pool
+
+The remaining 80% purchase funds are forwarded to the merchant by the CreditLine contract at loan creation; this contract only ever holds the guarantee deposit.
 
 This contract removes the need to trust either the CreditLine contract or any off-chain party with the guarantee funds. All fund movements are encoded in smart contract logic and emitted as auditable on-chain events.
 

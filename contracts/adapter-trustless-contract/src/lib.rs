@@ -26,6 +26,7 @@ impl AdapterTrustlessContract {
         if storage::has_admin(&env) {
             panic_with_error!(&env, AdapterError::AlreadyInitialized);
         }
+        admin.require_auth();
         storage::set_admin(&env, &admin);
         storage::set_creditline(&env, &creditline);
         storage::set_token(&env, &token);
