@@ -1,5 +1,5 @@
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
-use soroban_sdk::token::Client as TokenClient;
+use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use creditline_contract::{CreditLineContract, CreditLineContractClient};
 use liquidity_pool_contract::{LiquidityPoolContract, LiquidityPoolContractClient};
 use merchant_registry_contract::{MerchantRegistryContract, MerchantRegistryContractClient};
@@ -10,6 +10,7 @@ pub struct TestEnv<'a> {
     pub admin: Address,
     pub token: TokenClient<'a>,
     pub token_admin: Address,
+    pub token_admin_client: StellarAssetClient<'a>,
     pub creditline: CreditLineContractClient<'a>,
     pub liquidity_pool: LiquidityPoolContractClient<'a>,
     pub merchant_registry: MerchantRegistryContractClient<'a>,
@@ -30,6 +31,7 @@ impl<'a> TestEnv<'a> {
         
         let token_contract_id = env.register_stellar_asset_contract(token_admin.clone());
         let token = TokenClient::new(&env, &token_contract_id);
+        let token_admin_client = StellarAssetClient::new(&env, &token_contract_id);
         
         // Register contracts
         let creditline_id = env.register_contract(None, CreditLineContract);
@@ -53,6 +55,7 @@ impl<'a> TestEnv<'a> {
             &treasury,
             &merchant_fund,
         );
+        liquidity_pool.set_creditline(&admin, &creditline_id);
         
         creditline.initialize(
             &admin,
@@ -63,6 +66,7 @@ impl<'a> TestEnv<'a> {
         );
         
         // Setup reputation
+        reputation.set_admin(&admin);
         reputation.set_updater(&admin, &creditline_id, &true);
         // Note: the test will manually need to use `admin` to set updater if other addresses need to update, or we can just add `admin` as an updater for tests to be able to set initial scores.
         reputation.set_updater(&admin, &admin, &true);
@@ -72,6 +76,7 @@ impl<'a> TestEnv<'a> {
             admin,
             token,
             token_admin,
+            token_admin_client,
             creditline,
             liquidity_pool,
             merchant_registry,
