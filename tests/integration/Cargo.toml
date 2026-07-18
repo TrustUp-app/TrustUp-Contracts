@@ -1,0 +1,13 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+creditline-contract = { path = "../../contracts/creditline-contract" }
+liquidity-pool-contract = { path = "../../contracts/liquidity-pool-contract" }
+merchant-registry-contract = { path = "../../contracts/merchant-registry-contract" }
+parameters-contract = { path = "../../contracts/parameters-contract" }
+reputation-contract = { path = "../../contracts/reputation-contract" }

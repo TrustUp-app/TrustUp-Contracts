@@ -51,3 +51,6 @@ jobs:
         
     - name: Run tests
       run: cargo test --verbose
+      
+    - name: Run integration tests
+      run: cargo test -p integration-tests --verbose
