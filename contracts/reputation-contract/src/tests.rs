@@ -474,18 +474,19 @@ fn it_emits_score_changed_event_on_increase() {
         let event_type: Symbol = topics.get(0).unwrap().into_val(&env);
 
         if event_type == symbol_short!("SCORECHGD") {
-            found_event = true;
-
-            let event_user: Address = topics.get(1).unwrap().into_val(&env);
-            assert_eq!(event_user, user);
-
             let data_tuple: (u32, u32, Symbol) = event.2.into_val(&env);
             let (old_score, new_score, reason) = data_tuple;
-
-            assert_eq!(old_score, 50);
-            assert_eq!(new_score, 70);
-            assert_eq!(reason, symbol_short!("increase"));
-            break;
+            
+            if reason == symbol_short!("increase") {
+                found_event = true;
+    
+                let event_user: Address = topics.get(1).unwrap().into_val(&env);
+                assert_eq!(event_user, user);
+    
+                assert_eq!(old_score, 50);
+                assert_eq!(new_score, 70);
+                break;
+            }
         }
     }
 
@@ -575,15 +576,19 @@ fn it_emits_score_changed_event_on_set() {
             let (_, _, reason) = data_tuple;
 
             if reason == symbol_short!("set") {
-                found_event = true;
-
-                let event_user: Address = topics.get(1).unwrap().into_val(&env);
-                assert_eq!(event_user, user);
-
                 let (old_score, new_score, _) = data_tuple;
-                assert_eq!(old_score, 50);
-                assert_eq!(new_score, 75);
-                break;
+                
+                // Only assert on the second set_score event
+                if new_score == 75 {
+                    found_event = true;
+    
+                    let event_user: Address = topics.get(1).unwrap().into_val(&env);
+                    assert_eq!(event_user, user);
+    
+                    assert_eq!(old_score, 50);
+                    assert_eq!(new_score, 75);
+                    break;
+                }
             }
         }
     }
