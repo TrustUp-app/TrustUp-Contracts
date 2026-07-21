@@ -345,6 +345,112 @@ after 1 year (8% APY): 1 share = $1.08
 
 ---
 
+## Adapter Trustless Contract ✅
+
+**Status**: Implemented and tested
+
+**Purpose**: Remove the single-admin trust assumption from privileged, cross-contract
+operations. Each TrustUp contract gates sensitive operations (changing an admin,
+updating a cross-contract address, tuning risk parameters) behind a single `admin`
+address — a single point of failure and of trust. The adapter is a generic **M-of-N
+multi-sig + timelock gateway**: instead of an admin calling a privileged function
+directly, a signer proposes the call, a threshold of signers approve it, and only
+after a configured timelock delay can anyone trigger its execution. No single
+signer, including the adapter's own admin, can execute a privileged call alone.
+
+### Architecture
+
+**State**:
+```rust
+pub enum DataKey {
+    Admin,              // Instance: Admin address
+    Signers,            // Instance: Vec<Address> of authorized signers
+    Threshold,          // Instance: u32 approvals required to execute
+    TimelockSecs,       // Instance: u64 delay (seconds) between proposal and execution
+    NextActionId,       // Instance: u64 counter
+    Action(u64),        // Persistent: ActionId → Action
+}
+
+pub struct Action {
+    pub id: u64,
+    pub target: Address,        // Contract to call
+    pub function: Symbol,       // Function to invoke
+    pub args: Vec<Val>,         // Call arguments
+    pub proposer: Address,
+    pub proposed_at: u64,       // Ledger timestamp of proposal
+    pub approvals: Vec<Address>,
+    pub executed: bool,
+    pub canceled: bool,
+}
+```
+
+**Public API**:
+```rust
+// Setup
+pub fn initialize(env: Env, admin: Address, signers: Vec<Address>, threshold: u32, timelock_secs: u64)
+
+// Proposal lifecycle
+pub fn propose_action(env: Env, proposer: Address, target: Address, function: Symbol, args: Vec<Val>) -> u64
+pub fn approve_action(env: Env, signer: Address, action_id: u64)
+pub fn revoke_approval(env: Env, signer: Address, action_id: u64)
+pub fn execute_action(env: Env, caller: Address, action_id: u64) -> Val
+pub fn cancel_action(env: Env, admin: Address, action_id: u64)
+
+// Signer / config management (admin only)
+pub fn add_signer(env: Env, admin: Address, signer: Address)
+pub fn remove_signer(env: Env, admin: Address, signer: Address)
+pub fn set_threshold(env: Env, admin: Address, threshold: u32)
+pub fn set_timelock(env: Env, admin: Address, timelock_secs: u64)
+
+// Queries
+pub fn get_action(env: Env, action_id: u64) -> Action
+pub fn is_approved(env: Env, action_id: u64) -> bool
+pub fn is_executable(env: Env, action_id: u64) -> bool
+pub fn get_signers(env: Env) -> Vec<Address>
+pub fn get_threshold(env: Env) -> u32
+pub fn get_timelock(env: Env) -> u64
+pub fn get_admin(env: Env) -> Address
+```
+
+**Business Logic**:
+
+1. **Proposal**: Any authorized signer proposes a target contract, function, and
+   argument list. The proposer's approval is recorded immediately.
+2. **Approval**: Other signers approve; each signer may approve once and may revoke
+   their approval any time before execution.
+3. **Execution**: Once approvals reach `threshold` **and** `proposed_at + timelock`
+   has elapsed, any address can call `execute_action`, which invokes the target
+   contract via `Env::invoke_contract` and marks the action executed.
+4. **Cancellation**: The admin can cancel a pending action, which blocks execution
+   permanently — used to reject inappropriate proposals without disabling the
+   whole adapter.
+
+**Events**:
+- `ACTNPROP` / `ACTNAPPRV` / `ACTNREVK` / `ACTNEXEC` / `ACTNCANC`: Action lifecycle
+- `SIGNERADD` / `SIGNERRM`: Signer set changes
+- `THRESHCHG` / `TMLOCKCHG`: Config changes
+- `ADMINCHGD`: Admin changed
+
+**Access Control**:
+- Signers: Can propose, approve, and revoke their own approval
+- Admin: Can cancel actions and manage signers/threshold/timelock
+- Public: Can execute any action that has met threshold + timelock, and can read
+  any action
+
+**Security Features**:
+- Threshold enforced against the current signer count on every config change
+  (`remove_signer` and `set_threshold` both re-validate the invariant)
+- Timelock computed with `saturating_add` to avoid overflow
+- Execution and cancellation are idempotent-safe (`executed`/`canceled` flags)
+- Event emission for every state change, for off-chain auditability
+
+**What it does *not* do**: it does not replace each contract's own `admin` field —
+contracts must be reconfigured to name the adapter (or an address it controls) as
+their admin/updater to have its guarantees enforced. It is also a generic relay: it
+does not interpret or validate the semantics of the calls it forwards.
+
+---
+
 ## Contract Interactions
 
 ### Create Loan Flow
@@ -413,5 +519,6 @@ All contracts follow upgrade pattern:
 ## Resources
 
 - [Reputation Contract Source](../../contracts/reputation-contract/src/lib.rs)
+- [Adapter Trustless Contract Source](../../contracts/adapter-trustless-contract/src/lib.rs)
 - [Roadmap](../ROADMAP.md) - Implementation timeline
 - [Storage Patterns](storage-patterns.md) - Storage best practices
