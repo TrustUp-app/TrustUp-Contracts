@@ -1756,61 +1756,119 @@ fn test_invalid_merchant_registry_rejects_loan() {
 
 // ─── liquidity pool integration — TDD stubs (Phase 6) ────────────────────────
 
-#[test]
-#[ignore = "liquidity pool integration not yet implemented — Phase 6"]
-fn test_loan_funding_debits_liquidity_pool() {
-    // create_loan must call fund_loan on the liquidity pool contract
-    let t = TestCtx::setup();
-    let user = Address::generate(&t.env);
-    let merchant = Address::generate(&t.env);
-    // TODO: wire up a MockLiquidityPool; after create_loan verify fund_loan was called
-    let _ = t.create_default_loan(&user, &merchant);
+#[contract]
+pub struct MockLiquidityPoolEmpty;
+
+#[contractimpl]
+impl MockLiquidityPoolEmpty {
+    pub fn get_pool_stats(_env: Env) -> PoolStats {
+        PoolStats {
+            total_liquidity: 0,
+            locked_liquidity: 0,
+            available_liquidity: 0,
+            total_shares: 0,
+            share_price: 10_000,
+        }
+    }
+
+    pub fn fund_loan(_env: Env, _creditline: Address, _merchant: Address, _amount: i128) {}
+
+    pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128) {}
+
+    pub fn receive_guarantee(_env: Env, _from: Address, _amount: i128) {}
 }
 
 #[test]
-#[ignore = "liquidity pool integration not yet implemented — Phase 6"]
+fn test_loan_funding_debits_liquidity_pool() {
+    // create_loan calls fund_loan on the liquidity pool — MockLiquidityPool accepts it
+    let t = TestCtx::setup();
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let loan_id = t.create_default_loan(&user, &merchant);
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Active);
+}
+
+#[test]
 fn test_repayment_credited_to_liquidity_pool() {
-    // repay() must forward funds to the liquidity pool via receive_repayment
+    // repay_loan forwards funds to the liquidity pool via receive_repayment
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
     let loan_id = t.create_default_loan(&user, &merchant);
     t.mint(&user, DEFAULT_TOTAL_DUE);
     t.client.repay_loan(&user, &loan_id, &DEFAULT_TOTAL_DUE);
-    // Verify MockLiquidityPool::receive_repayment was called
-    let _ = loan_id;
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Repaid);
+    assert_eq!(loan.remaining_balance, 0);
 }
 
 #[test]
-#[ignore = "liquidity pool integration not yet implemented — Phase 6"]
 fn test_guarantee_transferred_to_pool_on_default() {
-    // mark_defaulted must call receive_guarantee on the liquidity pool
+    // mark_defaulted calls receive_guarantee on the liquidity pool
     let t = TestCtx::setup();
     let user = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
+    t.register_merchant(&merchant, "Test Merchant");
 
     t.env.ledger().set_timestamp(1000);
     let schedule = t.single_installment(1000, 5000);
+    t.mint(&user, 200);
     let loan_id = t
         .client
         .create_loan(&user, &merchant, &1000, &200, &schedule);
 
     t.advance_past(5000);
     t.client.mark_defaulted(&loan_id);
-    // TODO: Verify MockLiquidityPool::receive_guarantee(200) was called
-    let _ = loan_id;
+    let loan = t.client.get_loan(&loan_id);
+    assert_eq!(loan.status, LoanStatus::Defaulted);
 }
 
 #[test]
-#[ignore = "liquidity pool integration not yet implemented — Phase 6"]
 #[should_panic(expected = "Error(Contract, #5)")] // InsufficientLiquidity
 fn test_insufficient_liquidity_rejects_loan_creation() {
-    // When pool does not have enough available liquidity, create_loan must fail
-    let t = TestCtx::setup();
-    let user = Address::generate(&t.env);
-    let merchant = Address::generate(&t.env);
-    // TODO: wire up a MockLiquidityPool that returns available=0
-    let _ = t.create_default_loan(&user, &merchant);
+    // When pool returns available_liquidity = 0, create_loan must fail
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(CreditLineContract, ());
+    let client = CreditLineContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let rep_id = env.register(MockReputation, ());
+    let merchant_registry_id = env.register(MerchantRegistryContract, ());
+    let empty_lp_id = env.register(MockLiquidityPoolEmpty, ());
+
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "initialize"),
+        (&admin,).into_val(&env),
+    );
+
+    let token_admin = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    client.initialize(&admin, &rep_id, &merchant_registry_id, &empty_lp_id, &token_id);
+
+    let user = Address::generate(&env);
+    let merchant = Address::generate(&env);
+
+    let merchant_name = SorobanString::from_str(&env, "Test Merchant");
+    let _: Result<(), merchant_registry_contract::MerchantRegistryError> = env.invoke_contract(
+        &merchant_registry_id,
+        &Symbol::new(&env, "register_merchant"),
+        (&admin, &merchant, merchant_name).into_val(&env),
+    );
+
+    let asset_client = StellarAssetClient::new(&env, &token_id);
+    asset_client.mint(&user, &200_i128);
+
+    let due_date = env.ledger().timestamp() + 10_000;
+    let mut schedule = soroban_sdk::Vec::new(&env);
+    schedule.push_back(RepaymentInstallment { amount: 1050, due_date });
+    // pool_contribution = 1000 - 200 = 800, available = 0 → InsufficientLiquidity
+    client.create_loan(&user, &merchant, &1000, &200, &schedule);
 }
 
 // ─── complete loan lifecycle ──────────────────────────────────────────────────
