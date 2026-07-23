@@ -6,6 +6,7 @@ members = [
     "contracts/merchant-registry-contract",
     "contracts/liquidity-pool-contract",
     "contracts/lp-contract",
+    "contracts/adapter-trustless-contract",
     "tests/integration"
 ]
 resolver = "2"
