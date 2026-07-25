@@ -2645,6 +2645,33 @@ fn test_distribute_interest_emits_interest_distributed_event() {
 }
 
 #[test]
+fn test_withdraw_emits_liquidity_withdrawn_event() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+
+    t.client().withdraw(&provider, &400);
+
+    let events: Vec<(Address, Vec<Val>, Val)> = t.env.events().all();
+    let mut found_event = false;
+    for event in events.iter() {
+        let topics = event.1.clone();
+        if let Some(first) = topics.get(0) {
+            let sym: Symbol = first.into_val(&t.env);
+            if sym == symbol_short!("LQWTHDR") {
+                found_event = true;
+                let data: (i128, i128) = event.2.into_val(&t.env);
+                assert_eq!(data.0, 400); // shares_burned
+                assert_eq!(data.1, 400); // amount_returned
+                break;
+            }
+        }
+    }
+    assert!(found_event, "LiquidityWithdrawn (LQWTHDR) event must be emitted");
+}
+
+#[test]
 fn test_distribute_interest_rounding_remainder_to_merchant() {
     // 101 tokens: lp=85 (floor), protocol=10 (floor), merchant=6 (remainder avoids dust)
     let t = TestEnv::setup();
