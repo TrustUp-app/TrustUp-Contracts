@@ -13,25 +13,23 @@ jobs:
   build:
     name: Build Contracts
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
+
+    - name: Install Rust (stable)
+      uses: dtolnay/rust-toolchain@stable
       with:
-        profile: minimal
-        toolchain: stable
-        override: true
-        
-    - name: Add wasm32 target
-      run: rustup target add wasm32-unknown-unknown
-      
-    - name: Build contracts
+        targets: wasm32-unknown-unknown
+
+    - name: Cache Cargo registry & build artefacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build contracts (debug)
       run: cargo build --verbose
-      
-    - name: Build WASM
+
+    - name: Build reputation-contract WASM
       run: cargo build -p reputation-contract --target wasm32-unknown-unknown --release
 
     - name: Build adapter-trustless-contract WASM
@@ -40,20 +38,19 @@ jobs:
   test:
     name: Test Contracts
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
-        
-    - name: Run tests
+
+    - name: Install Rust (stable)
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo registry & build artefacts
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run unit tests (all workspace members)
       run: cargo test --verbose
-      
+
     - name: Run integration tests
       run: cargo test -p integration-tests --verbose
