@@ -1756,27 +1756,33 @@ fn test_invalid_merchant_registry_rejects_loan() {
 
 // ─── liquidity pool integration — TDD stubs (Phase 6) ────────────────────────
 
-#[contract]
-pub struct MockLiquidityPoolEmpty;
+mod mock_empty_pool {
+    use liquidity_pool_contract::PoolStats;
+    use soroban_sdk::{contract, contractimpl, Address, Env};
 
-#[contractimpl]
-impl MockLiquidityPoolEmpty {
-    pub fn get_pool_stats(_env: Env) -> PoolStats {
-        PoolStats {
-            total_liquidity: 0,
-            locked_liquidity: 0,
-            available_liquidity: 0,
-            total_shares: 0,
-            share_price: 10_000,
+    #[contract]
+    pub struct MockLiquidityPoolEmpty;
+
+    #[contractimpl]
+    impl MockLiquidityPoolEmpty {
+        pub fn get_pool_stats(_env: Env) -> PoolStats {
+            PoolStats {
+                total_liquidity: 0,
+                locked_liquidity: 0,
+                available_liquidity: 0,
+                total_shares: 0,
+                share_price: 10_000,
+            }
         }
+
+        pub fn fund_loan(_env: Env, _creditline: Address, _merchant: Address, _amount: i128) {}
+
+        pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128) {}
+
+        pub fn receive_guarantee(_env: Env, _from: Address, _amount: i128) {}
     }
-
-    pub fn fund_loan(_env: Env, _creditline: Address, _merchant: Address, _amount: i128) {}
-
-    pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128) {}
-
-    pub fn receive_guarantee(_env: Env, _from: Address, _amount: i128) {}
 }
+use mock_empty_pool::MockLiquidityPoolEmpty;
 
 #[test]
 fn test_loan_funding_debits_liquidity_pool() {
