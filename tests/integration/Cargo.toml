@@ -11,3 +11,6 @@ liquidity-pool-contract = { path = "../../contracts/liquidity-pool-contract" }
 merchant-registry-contract = { path = "../../contracts/merchant-registry-contract" }
 parameters-contract = { path = "../../contracts/parameters-contract" }
 reputation-contract = { path = "../../contracts/reputation-contract" }
+
+[dev-dependencies]
+proptest = { version = "=1.0.0", default-features = false, features = ["std", "alloc"] }

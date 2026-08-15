@@ -28,11 +28,14 @@ pub fn bump_instance(env: &Env) {
 }
 
 pub fn bump_lp_shares(env: &Env, provider: &Address) {
-    env.storage().persistent().extend_ttl(
-        &(LP_SHARES_PREFIX, provider.clone()),
-        PERSISTENT_LIFETIME_THRESHOLD,
-        PERSISTENT_BUMP_AMOUNT,
-    );
+    let key = (LP_SHARES_PREFIX, provider.clone());
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
 }
 
 // --- Admin ---
