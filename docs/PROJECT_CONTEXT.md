@@ -356,7 +356,9 @@ See [ROADMAP.md](ROADMAP.md) for detailed issue breakdown.
 - Reputation delegation (high-score users vouch for others)
 
 **Phase 3**: Ecosystem Growth
-- Governance token for protocol parameters
+- ~~Governance token for protocol parameters~~ — superseded by
+  `parameters-contract`'s built-in proposal + multi-sig + timelock governance
+  (see [architecture/contracts.md](architecture/contracts.md#parameters-contract-)); no separate token needed
 - Merchant analytics dashboard
 - Credit score aggregation from multiple DeFi protocols
 - Integration with traditional credit bureaus (opt-in)

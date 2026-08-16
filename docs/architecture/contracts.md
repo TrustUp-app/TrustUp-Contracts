@@ -451,6 +451,110 @@ does not interpret or validate the semantics of the calls it forwards.
 
 ---
 
+## Parameters Contract ✅
+
+**Status**: Implemented and tested
+
+**Purpose**: Hold `ProtocolParameters` (guarantee/reputation/interest/penalty
+settings) and, since this extension, govern changes to them and to a protocol-wide
+emergency pause flag through proposal + multi-sig approval + timelock, rather than
+a single admin applying changes instantly. This replaces the "Phase 3: Governance
+token for protocol parameters" line item in the roadmap with a lighter-weight
+multi-sig/timelock design instead of a separate token.
+
+### Architecture
+
+**State** (in addition to the pre-existing `admin` / `params` instance keys):
+```rust
+pub enum DataKey {
+    Signers,          // Instance: Vec<Address> of governance signers
+    Threshold,        // Instance: u32 approvals required to execute
+    TimelockSecs,     // Instance: u64 delay for parameter-change proposals
+    NextProposalId,   // Instance: u64 counter
+    Proposal(u64),    // Persistent: ProposalId → Proposal
+    Paused,           // Instance: bool, protocol-wide emergency pause flag
+}
+
+pub enum ProposalKind {
+    UpdateParameters(ProtocolParameters),
+    SetPaused(bool),
+}
+
+pub struct Proposal {
+    pub id: u64,
+    pub kind: ProposalKind,
+    pub proposer: Address,
+    pub proposed_at: u64,
+    pub approvals: Vec<Address>,
+    pub status: ProposalStatus, // Pending | Executed | Cancelled
+}
+```
+
+**Public API** (governance additions):
+```rust
+// One-time migration off the single hardcoded admin (admin-only)
+pub fn migrate_to_multisig(env: Env, admin: Address, signers: Vec<Address>, threshold: u32, timelock_secs: u64)
+
+// Proposal lifecycle
+pub fn propose_parameters(env: Env, proposer: Address, params: ProtocolParameters) -> u64
+pub fn propose_pause(env: Env, proposer: Address, paused: bool) -> u64
+pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64)
+pub fn execute_proposal(env: Env, caller: Address, proposal_id: u64)
+pub fn cancel_proposal(env: Env, caller: Address, proposal_id: u64)
+
+// Queries
+pub fn is_paused(env: Env) -> bool
+pub fn get_proposal(env: Env, proposal_id: u64) -> Proposal
+pub fn get_signers(env: Env) -> Vec<Address>
+pub fn get_threshold(env: Env) -> u32
+pub fn get_timelock(env: Env) -> u64
+```
+
+**Business Logic**:
+
+1. **Migration**: The current single admin calls `migrate_to_multisig` once to
+   install a signer set, an approval threshold, and a timelock (seconds). After
+   this, the legacy `update_parameters` and `set_admin` entrypoints are disabled
+   (`GovernanceActive` error) — all further changes must go through proposals.
+2. **Proposing**: Any signer proposes either a new `ProtocolParameters` value or a
+   pause/unpause toggle. The proposer's own approval is recorded immediately.
+3. **Approving**: Other signers approve once each; a proposal becomes executable
+   once approvals reach `threshold`.
+4. **Executing**: `UpdateParameters` proposals additionally require
+   `proposed_at + timelock_secs` to have elapsed before they can execute, giving
+   the community time to react to a pending change. `SetPaused` proposals skip
+   the timelock so an emergency pause isn't delayed — they still require the
+   full signer threshold, so pausing can't be triggered unilaterally.
+5. **Cancelling**: The original proposer or the (legacy) admin can withdraw a
+   pending proposal at any time before execution.
+
+**Events**: `PRMPROP` / `PRMAPPR` / `PRMEXEC` / `PRMCANC` (proposal lifecycle),
+`PRMPAUS` / `PRMUNPAU` (pause toggled), `PRMMIGR` (migrated to multi-sig),
+`PARMUPDT` / `PARMADMN` (pre-existing parameter/admin-update events, still emitted
+on execution of an `UpdateParameters` proposal).
+
+**Access Control**:
+- Signers: Can propose, approve, and (if they proposed it) cancel
+- Admin (pre-migration only): Can call the legacy instant-update entrypoints;
+  post-migration, can still cancel any pending proposal
+- Public: Can execute any proposal that has met threshold (+ timelock, for
+  parameter changes), and can read any proposal or the paused flag
+
+**Security Features**:
+- Threshold validated against signer count at migration time
+- Timelock applied only to parameter changes, computed with `saturating_add`
+- Execution/cancellation are idempotent-safe via `ProposalStatus`
+- Legacy single-admin update path is hard-disabled once governance is active,
+  so there is no unguarded fallback once a protocol has migrated
+
+**What it does *not* do**: it does not itself gate other contracts' functions —
+contracts that want to honor the pause flag must call `is_paused` (as
+`liquidity-pool-contract`'s own `pause`/`unpause` did previously with its local
+flag) or be wired through the `adapter-trustless-contract` for cross-contract
+enforcement.
+
+---
+
 ## Contract Interactions
 
 ### Create Loan Flow
