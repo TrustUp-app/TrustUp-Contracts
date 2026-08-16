@@ -8,3 +8,10 @@ pub fn require_admin(env: &Env, caller: &Address) {
         panic_with_error!(env, ParametersError::NotAdmin);
     }
 }
+
+/// Require that `caller` is a member of the governance signer set.
+pub fn require_signer(env: &Env, caller: &Address) {
+    if !storage::is_signer(env, caller) {
+        panic_with_error!(env, ParametersError::NotSigner);
+    }
+}
