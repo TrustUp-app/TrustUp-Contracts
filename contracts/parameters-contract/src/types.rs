@@ -1,4 +1,4 @@
-use soroban_sdk::contracttype;
+use soroban_sdk::{contracttype, Address, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,6 +26,48 @@ pub const DEFAULT_BASE_INTEREST_BPS: u32 = 0;
 /// Default grace period: disabled (0).  Set via governance to enable, e.g.
 /// 259_200 for a 3-day window.
 pub const DEFAULT_GRACE_PERIOD_SECONDS: u64 = 0;
+
+/// What a governance proposal changes when it executes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalKind {
+    UpdateParameters(ProtocolParameters),
+    SetPaused(bool),
+}
+
+/// Lifecycle state of a proposal.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Pending,
+    Executed,
+    Cancelled,
+}
+
+/// A governed change awaiting multi-sig approval (and, for parameter changes,
+/// a timelock) before it can be executed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Proposal {
+    pub id: u64,
+    pub kind: ProposalKind,
+    pub proposer: Address,
+    pub proposed_at: u64,
+    pub approvals: Vec<Address>,
+    pub status: ProposalStatus,
+}
+
+/// Storage keys for the governance extension. Kept separate from the legacy
+/// `ADMIN_KEY` / `PARAMS_KEY` symbols so pre-existing instance data is untouched.
+#[contracttype]
+pub enum DataKey {
+    Signers,
+    Threshold,
+    TimelockSecs,
+    NextProposalId,
+    Proposal(u64),
+    Paused,
+}
 
 pub fn default_parameters() -> ProtocolParameters {
     ProtocolParameters {
