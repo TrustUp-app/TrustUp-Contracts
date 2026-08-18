@@ -6,6 +6,8 @@ const LOAN_FUNDED: Symbol = symbol_short!("LQFUND");
 const REPAYMENT_RCV: Symbol = symbol_short!("LQREPAY");
 const GUARANTEE_RCV: Symbol = symbol_short!("LQGUART");
 const INTEREST_DIST: Symbol = symbol_short!("LQINTDST");
+const SHARE_TRANSFER: Symbol = symbol_short!("LQXFER");
+const APPROVAL: Symbol = symbol_short!("LQAPPRV");
 
 /// Emitted when a liquidity provider deposits tokens
 pub fn emit_liquidity_deposited(env: &Env, provider: &Address, amount: i128, shares_issued: i128) {
@@ -52,4 +54,21 @@ pub fn emit_interest_distributed(
         (INTEREST_DIST,),
         (total_interest, lp_amount, protocol_amount, merchant_amount),
     );
+}
+
+/// Emitted when LP shares change owner via `transfer` or `transfer_from`
+pub fn emit_share_transferred(env: &Env, from: &Address, to: &Address, amount: i128) {
+    env.events().publish((SHARE_TRANSFER, from, to), amount);
+}
+
+/// Emitted when an owner sets a spender's allowance over their LP shares
+pub fn emit_approval(
+    env: &Env,
+    from: &Address,
+    spender: &Address,
+    amount: i128,
+    expiration_ledger: u32,
+) {
+    env.events()
+        .publish((APPROVAL, from, spender), (amount, expiration_ledger));
 }
