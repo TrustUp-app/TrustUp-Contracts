@@ -50,17 +50,26 @@ pub enum ReputationError {
 | 4 | `InvalidMerchantName` | Empty or too long name |
 | 5 | `MerchantInactive` | Merchant deactivated |
 
-## Liquidity Pool (Planned)
+## Liquidity Pool
+
+**Location**: `contracts/liquidity-pool-contract/src/errors.rs`
 
 | Code | Name | Description |
 |------|------|-------------|
-| 1 | `InvalidDepositAmount` | Amount ≤0 |
-| 2 | `InsufficientShares` | Not enough shares to withdraw |
-| 3 | `InsufficientLiquidity` | Pool lacks available liquidity |
-| 4 | `PoolEmpty` | No liquidity (division by zero) |
-| 5 | `InvalidWithdrawalAmount` | Amount ≤0 |
-| 6 | `OverflowError` | Arithmetic overflow |
-| 7 | `TransferFailed` | Token transfer failed |
+| 1 | `NotAdmin` | Caller is not the admin |
+| 2 | `AlreadyInitialized` | `initialize` called twice |
+| 3 | `NotInitialized` | Contract used before initialization |
+| 4 | `InvalidAmount` | Amount ≤0 (deposit, withdraw, transfer) or negative approval |
+| 5 | `InsufficientShares` | Balance below the shares being withdrawn or transferred |
+| 6 | `InsufficientLiquidity` | Requested amount exceeds available (unlocked) liquidity |
+| 7 | `Overflow` | Arithmetic overflow |
+| 8 | `Underflow` | Arithmetic underflow |
+| 9 | `NotCreditLine` | Caller is not the registered CreditLine |
+| 10 | `ZeroTotalShares` | Withdrawal while the pool has no shares |
+| 11 | `ReentrancyDetected` | Reentrant call blocked |
+| 12 | `ContractPaused` | Operation attempted while paused |
+| 13 | `InsufficientAllowance` | `transfer_from` exceeds (or has no) live allowance |
+| 14 | `InvalidExpirationLedger` | Approval expires in the past or beyond the max entry TTL |
 
 ## Error Handling Patterns
 
