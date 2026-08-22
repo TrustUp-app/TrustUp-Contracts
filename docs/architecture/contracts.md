@@ -226,6 +226,8 @@ pub fn get_merchant_count(env: Env) -> u64
 
 **Status**: Planned
 
+**Crate:** [`liquidity-pool-contract`](../../contracts/liquidity-pool-contract/). This is the only liquidity-pool crate in the workspace.
+
 **Purpose**: Manage liquidity provider deposits, withdrawals, and loan funding
 
 ### Planned Architecture
