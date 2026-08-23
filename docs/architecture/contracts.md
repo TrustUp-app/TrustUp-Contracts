@@ -222,13 +222,14 @@ pub fn get_merchant_count(env: Env) -> u64
 
 ---
 
-## Liquidity Pool Contract ⏳
+## Liquidity Pool Contract ✅
 
-**Status**: Planned
+**Status**: Implemented and tested — see the contract
+[README](../../contracts/liquidity-pool-contract/README.md)
 
-**Purpose**: Manage liquidity provider deposits, withdrawals, and loan funding
+**Purpose**: Manage liquidity provider deposits, withdrawals, share transfers, and loan funding
 
-### Planned Architecture
+### Architecture
 
 **State**:
 ```rust
@@ -242,6 +243,9 @@ pub enum DataKey {
 
     // Persistent storage
     LpShares(Address),      // Address → shares owned
+
+    // Temporary storage
+    Allowance(AllowanceKey), // (owner, spender) → AllowanceValue, self-expiring
 }
 
 #[contracttype]
@@ -254,25 +258,46 @@ pub struct PoolStats {
 }
 ```
 
-**Public API** (planned):
+**Public API**:
 ```rust
 // Initialization
-pub fn initialize(env: Env, admin: Address, token: Address)
+pub fn initialize(env: Env, admin: Address, token: Address, treasury: Address, merchant_fund: Address)
 
 // LP operations
 pub fn deposit(env: Env, provider: Address, amount: i128) -> i128  // Returns shares
 pub fn withdraw(env: Env, provider: Address, shares: i128) -> i128  // Returns amount
 
+// Share transfers — secondary market (SEP-41-style)
+pub fn approve(env: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32)
+pub fn allowance(env: Env, from: Address, spender: Address) -> i128
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128)
+pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128)
+
 // CreditLine operations (restricted)
-pub fn fund_loan(env: Env, creditline: Address, amount: i128)
-pub fn receive_repayment(env: Env, creditline: Address, amount: i128)
+pub fn fund_loan(env: Env, creditline: Address, merchant: Address, amount: i128)
+pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128)
 pub fn receive_guarantee(env: Env, creditline: Address, amount: i128)
+pub fn distribute_interest(env: Env, caller: Address, interest_amount: i128)
 
 // Queries
 pub fn get_pool_stats(env: Env) -> PoolStats
 pub fn get_lp_shares(env: Env, provider: Address) -> i128
 pub fn calculate_withdrawal(env: Env, shares: i128) -> i128
 ```
+
+**Share Transfers**:
+
+LP shares are a fungible, pool-wide claim, so moving them between holders leaves
+`total_shares`, `total_liquidity` and `locked_liquidity` untouched — only the owner
+of the claim changes. Every transfer path goes through a single internal
+`move_shares` helper that preserves those invariants, and self-transfers are a
+strict no-op on balances.
+
+Transfers stay open while loans are outstanding: exposure is enforced where value
+actually leaves the pool, since `withdraw` is capped by available liquidity and the
+buyer inherits exactly the same cap as the seller. Emits `LQAPPRV` (approval) and
+`LQXFER` (share transferred). Allowances carry an `expiration_ledger` and are held
+in temporary storage so they expire on their own.
 
 **Share Mechanics**:
 

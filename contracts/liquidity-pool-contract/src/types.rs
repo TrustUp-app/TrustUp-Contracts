@@ -1,4 +1,4 @@
-use soroban_sdk::contracttype;
+use soroban_sdk::{contracttype, Address};
 
 /// Pool statistics returned by get_pool_stats
 #[contracttype]
@@ -10,6 +10,25 @@ pub struct PoolStats {
     pub total_shares: i128,
     /// Share price expressed in basis points (10000 = $1.00)
     pub share_price: i128,
+}
+
+/// Identifies an allowance granted by `from` to `spender` over LP shares.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowanceKey {
+    pub from: Address,
+    pub spender: Address,
+}
+
+/// Allowance amount together with the ledger at which it stops being usable.
+///
+/// Mirrors SEP-41: an allowance is only spendable while
+/// `expiration_ledger >= current ledger sequence`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowanceValue {
+    pub amount: i128,
+    pub expiration_ledger: u32,
 }
 
 // Fee split constants (basis points, sum = 10000)
