@@ -1,7 +1,7 @@
 use crate::{LiquidityPoolContract, LiquidityPoolContractClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events},
+    testutils::{Address as _, Events, Ledger as _},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, IntoVal, Symbol, Val, Vec,
 };
@@ -2567,7 +2567,10 @@ fn test_distribute_interest_lp_portion_stays_in_pool() {
     // 85% of 500 = 425 stayed in pool; only 75 (15%) transferred out
     let lp_amount = 500i128 * 8500 / 10000; // 425
     let expected_outflow = 500 - lp_amount; // 75
-    assert_eq!(contract_balance_before - contract_balance_after, expected_outflow);
+    assert_eq!(
+        contract_balance_before - contract_balance_after,
+        expected_outflow
+    );
 }
 
 #[test]
@@ -2634,14 +2637,17 @@ fn test_distribute_interest_emits_interest_distributed_event() {
                 // Verify all four fields: (total, lp, protocol, merchant)
                 let data: (i128, i128, i128, i128) = event.2.into_val(&t.env);
                 assert_eq!(data.0, 100); // total_interest
-                assert_eq!(data.1, 85);  // lp_amount (85%)
-                assert_eq!(data.2, 10);  // protocol_amount (10%)
-                assert_eq!(data.3, 5);   // merchant_amount (5%)
+                assert_eq!(data.1, 85); // lp_amount (85%)
+                assert_eq!(data.2, 10); // protocol_amount (10%)
+                assert_eq!(data.3, 5); // merchant_amount (5%)
                 break;
             }
         }
     }
-    assert!(found_event, "InterestDistributed (LQINTDST) event must be emitted");
+    assert!(
+        found_event,
+        "InterestDistributed (LQINTDST) event must be emitted"
+    );
 }
 
 #[test]
@@ -2658,4 +2664,784 @@ fn test_distribute_interest_rounding_remainder_to_merchant() {
     assert_eq!(t.token().balance(&t.treasury), 10);
     // remainder = 101 - 85 - 10 = 6 goes to merchant (no dust lost to rounding)
     assert_eq!(t.token().balance(&t.merchant_fund), 6);
+}
+
+// ─── share transfers: helpers ─────────────────────────────────────────────────
+
+impl TestEnv {
+    /// Create a provider holding `amount` shares from a fresh deposit.
+    fn provider_with_shares(&self, amount: i128) -> Address {
+        let provider = Address::generate(&self.env);
+        self.mint(&provider, amount);
+        self.client().deposit(&provider, &amount);
+        provider
+    }
+
+    /// Ledger sequence far enough ahead to be a valid allowance expiration.
+    fn future_ledger(&self) -> u32 {
+        self.env.ledger().sequence() + 1_000
+    }
+}
+
+// ─── approve / allowance ──────────────────────────────────────────────────────
+
+#[test]
+fn test_allowance_defaults_to_zero() {
+    let t = TestEnv::setup();
+    let owner = Address::generate(&t.env);
+    let spender = Address::generate(&t.env);
+
+    assert_eq!(t.client().allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_approve_sets_allowance() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+
+    assert_eq!(t.client().allowance(&owner, &spender), 400);
+    // Allowances are directional: the reverse pair is untouched.
+    assert_eq!(t.client().allowance(&spender, &owner), 0);
+}
+
+#[test]
+fn test_approve_overwrites_previous_allowance() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let expiration = t.future_ledger();
+
+    t.client().approve(&owner, &spender, &400, &expiration);
+    t.client().approve(&owner, &spender, &150, &expiration);
+
+    // Overwrite, not accumulate.
+    assert_eq!(t.client().allowance(&owner, &spender), 150);
+}
+
+#[test]
+fn test_approve_zero_revokes_allowance() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let expiration = t.future_ledger();
+
+    t.client().approve(&owner, &spender, &400, &expiration);
+    t.client().approve(&owner, &spender, &0, &expiration);
+
+    assert_eq!(t.client().allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_approve_zero_accepts_past_expiration() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.env.ledger().set_sequence_number(500);
+    // Revoking must never be blocked by the expiration check.
+    t.client().approve(&owner, &spender, &0, &1);
+
+    assert_eq!(t.client().allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_approve_does_not_move_shares() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+
+    assert_eq!(t.client().get_lp_shares(&owner), 1_000);
+    assert_eq!(t.client().get_lp_shares(&spender), 0);
+    assert_eq!(t.client().get_pool_stats().total_shares, 1_000);
+}
+
+#[test]
+fn test_approve_more_than_balance_is_allowed() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    // Approving beyond the balance is legal; the balance is checked on spend.
+    t.client()
+        .approve(&owner, &spender, &5_000, &t.future_ledger());
+
+    assert_eq!(t.client().allowance(&owner, &spender), 5_000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_approve_negative_amount_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &-1, &t.future_ledger());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #14)")]
+fn test_approve_with_past_expiration_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.env.ledger().set_sequence_number(500);
+    t.client().approve(&owner, &spender, &400, &499);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #14)")]
+fn test_approve_beyond_max_ttl_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    // Further out than the network will keep the entry alive.
+    t.client().approve(&owner, &spender, &400, &u32::MAX);
+}
+
+#[test]
+fn test_approve_emits_approval_event() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let expiration = t.future_ledger();
+
+    t.client().approve(&owner, &spender, &400, &expiration);
+
+    let events: Vec<(Address, Vec<Val>, Val)> = t.env.events().all();
+    let mut found_event = false;
+    for event in events.iter() {
+        let topics = event.1.clone();
+        if let Some(first) = topics.get(0) {
+            let sym: Symbol = first.into_val(&t.env);
+            if sym == symbol_short!("LQAPPRV") {
+                found_event = true;
+                let from: Address = topics.get(1).unwrap().into_val(&t.env);
+                let approved_spender: Address = topics.get(2).unwrap().into_val(&t.env);
+                let data: (i128, u32) = event.2.into_val(&t.env);
+                assert_eq!(from, owner);
+                assert_eq!(approved_spender, spender);
+                assert_eq!(data.0, 400);
+                assert_eq!(data.1, expiration);
+                break;
+            }
+        }
+    }
+    assert!(found_event, "Approval (LQAPPRV) event must be emitted");
+}
+
+#[test]
+fn test_allowance_reads_zero_after_expiration() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client().approve(&owner, &spender, &400, &100);
+    assert_eq!(t.client().allowance(&owner, &spender), 400);
+
+    // One ledger past the expiration the allowance is gone.
+    t.env.ledger().set_sequence_number(101);
+    assert_eq!(t.client().allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_allowance_still_live_on_expiration_ledger() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client().approve(&owner, &spender, &400, &100);
+
+    // `expiration_ledger` itself is still usable (inclusive).
+    t.env.ledger().set_sequence_number(100);
+    assert_eq!(t.client().allowance(&owner, &spender), 400);
+}
+
+#[test]
+fn test_approve_requires_owner_auth() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+
+    let auths = t.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, owner);
+}
+
+// ─── transfer ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_transfer_moves_shares() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    assert_eq!(t.client().get_lp_shares(&seller), 600);
+    assert_eq!(t.client().get_lp_shares(&buyer), 400);
+}
+
+#[test]
+fn test_transfer_full_balance() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &1_000);
+
+    assert_eq!(t.client().get_lp_shares(&seller), 0);
+    assert_eq!(t.client().get_lp_shares(&buyer), 1_000);
+}
+
+#[test]
+fn test_transfer_leaves_pool_accounting_untouched() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+    let before = t.client().get_pool_stats();
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    // A transfer only reassigns ownership — no shares are minted or burned and
+    // no liquidity enters or leaves the pool.
+    let after = t.client().get_pool_stats();
+    assert_eq!(after, before);
+    assert_eq!(
+        t.client().get_lp_shares(&seller) + t.client().get_lp_shares(&buyer),
+        after.total_shares
+    );
+}
+
+#[test]
+fn test_transfer_does_not_move_tokens() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    // Underlying tokens stay in the pool until someone withdraws.
+    assert_eq!(t.token().balance(&t.contract_id), 1_000);
+    assert_eq!(t.token().balance(&seller), 0);
+    assert_eq!(t.token().balance(&buyer), 0);
+}
+
+#[test]
+fn test_transfer_to_existing_holder_accumulates() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = t.provider_with_shares(500);
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    assert_eq!(t.client().get_lp_shares(&seller), 600);
+    assert_eq!(t.client().get_lp_shares(&buyer), 900);
+    assert_eq!(t.client().get_pool_stats().total_shares, 1_500);
+}
+
+#[test]
+fn test_self_transfer_preserves_balance() {
+    let t = TestEnv::setup();
+    let holder = t.provider_with_shares(1_000);
+
+    t.client().transfer(&holder, &holder, &400);
+
+    // Must be a strict no-op on balances — never a way to mint shares.
+    assert_eq!(t.client().get_lp_shares(&holder), 1_000);
+    assert_eq!(t.client().get_pool_stats().total_shares, 1_000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_self_transfer_beyond_balance_fails() {
+    let t = TestEnv::setup();
+    let holder = t.provider_with_shares(1_000);
+
+    t.client().transfer(&holder, &holder, &1_001);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_transfer_insufficient_shares_fails() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &1_001);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_transfer_from_holder_without_shares_fails() {
+    let t = TestEnv::setup();
+    let stranger = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&stranger, &buyer, &1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_transfer_zero_amount_fails() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_transfer_negative_amount_fails() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &-100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")]
+fn test_transfer_blocked_when_paused() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().pause(&t.admin);
+    t.client().transfer(&seller, &buyer, &400);
+}
+
+#[test]
+fn test_transfer_requires_sender_auth() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    let auths = t.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, seller);
+}
+
+#[test]
+fn test_transfer_emits_share_transferred_event() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    let events: Vec<(Address, Vec<Val>, Val)> = t.env.events().all();
+    let mut found_event = false;
+    for event in events.iter() {
+        let topics = event.1.clone();
+        if let Some(first) = topics.get(0) {
+            let sym: Symbol = first.into_val(&t.env);
+            if sym == symbol_short!("LQXFER") {
+                found_event = true;
+                let from: Address = topics.get(1).unwrap().into_val(&t.env);
+                let to: Address = topics.get(2).unwrap().into_val(&t.env);
+                let amount: i128 = event.2.into_val(&t.env);
+                assert_eq!(from, seller);
+                assert_eq!(to, buyer);
+                assert_eq!(amount, 400);
+                break;
+            }
+        }
+    }
+    assert!(
+        found_event,
+        "ShareTransferred (LQXFER) event must be emitted"
+    );
+}
+
+// ─── transfer_from ────────────────────────────────────────────────────────────
+
+#[test]
+fn test_transfer_from_moves_shares_and_spends_allowance() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &500, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &300);
+
+    assert_eq!(t.client().get_lp_shares(&owner), 700);
+    assert_eq!(t.client().get_lp_shares(&buyer), 300);
+    // Spender is only an operator — it never holds the shares itself.
+    assert_eq!(t.client().get_lp_shares(&spender), 0);
+    assert_eq!(t.client().allowance(&owner, &spender), 200);
+}
+
+#[test]
+fn test_transfer_from_spender_can_be_the_recipient() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    // Typical secondary-market flow: buyer pulls the shares they paid for.
+    t.client().approve(&owner, &buyer, &500, &t.future_ledger());
+    t.client().transfer_from(&buyer, &owner, &buyer, &500);
+
+    assert_eq!(t.client().get_lp_shares(&owner), 500);
+    assert_eq!(t.client().get_lp_shares(&buyer), 500);
+    assert_eq!(t.client().allowance(&owner, &buyer), 0);
+}
+
+#[test]
+fn test_transfer_from_exact_allowance_consumes_it() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &400);
+
+    assert_eq!(t.client().allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_transfer_from_partial_spends_are_cumulative() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &500, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &200);
+    t.client().transfer_from(&spender, &owner, &buyer, &250);
+
+    assert_eq!(t.client().allowance(&owner, &spender), 50);
+    assert_eq!(t.client().get_lp_shares(&buyer), 450);
+}
+
+#[test]
+fn test_transfer_from_self_transfer_spends_allowance() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &500, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &owner, &300);
+
+    assert_eq!(t.client().get_lp_shares(&owner), 1_000);
+    assert_eq!(t.client().get_pool_stats().total_shares, 1_000);
+    assert_eq!(t.client().allowance(&owner, &spender), 200);
+}
+
+#[test]
+fn test_transfer_from_leaves_pool_accounting_untouched() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+    let before = t.client().get_pool_stats();
+
+    t.client()
+        .approve(&owner, &spender, &500, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &300);
+
+    assert_eq!(t.client().get_pool_stats(), before);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_transfer_from_without_approval_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer_from(&spender, &owner, &buyer, &1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_transfer_from_insufficient_allowance_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &401);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_transfer_from_after_revocation_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+    let expiration = t.future_ledger();
+
+    t.client().approve(&owner, &spender, &400, &expiration);
+    t.client().approve(&owner, &spender, &0, &expiration);
+    t.client().transfer_from(&spender, &owner, &buyer, &1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #13)")]
+fn test_transfer_from_expired_allowance_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client().approve(&owner, &spender, &400, &100);
+    t.env.ledger().set_sequence_number(101);
+    t.client().transfer_from(&spender, &owner, &buyer, &100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_transfer_from_insufficient_shares_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    // Allowance is generous, the balance is not.
+    t.client()
+        .approve(&owner, &spender, &5_000, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &1_001);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_transfer_from_zero_amount_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_transfer_from_negative_amount_fails() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &-100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")]
+fn test_transfer_from_blocked_when_paused() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().pause(&t.admin);
+    t.client().transfer_from(&spender, &owner, &buyer, &400);
+}
+
+#[test]
+fn test_transfer_from_requires_spender_auth() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &400);
+
+    // The owner already signed at approve time; only the spender signs here.
+    let auths = t.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, spender);
+}
+
+#[test]
+fn test_transfer_from_emits_share_transferred_event() {
+    let t = TestEnv::setup();
+    let owner = t.provider_with_shares(1_000);
+    let spender = Address::generate(&t.env);
+    let buyer = Address::generate(&t.env);
+
+    t.client()
+        .approve(&owner, &spender, &400, &t.future_ledger());
+    t.client().transfer_from(&spender, &owner, &buyer, &400);
+
+    let events: Vec<(Address, Vec<Val>, Val)> = t.env.events().all();
+    let mut found_event = false;
+    for event in events.iter() {
+        let topics = event.1.clone();
+        if let Some(first) = topics.get(0) {
+            let sym: Symbol = first.into_val(&t.env);
+            if sym == symbol_short!("LQXFER") {
+                found_event = true;
+                // Topics carry the share owners, not the spender.
+                let from: Address = topics.get(1).unwrap().into_val(&t.env);
+                let to: Address = topics.get(2).unwrap().into_val(&t.env);
+                assert_eq!(from, owner);
+                assert_eq!(to, buyer);
+                break;
+            }
+        }
+    }
+    assert!(
+        found_event,
+        "ShareTransferred (LQXFER) event must be emitted"
+    );
+}
+
+// ─── transfers vs. loan exposure and pool value ───────────────────────────────
+
+#[test]
+fn test_transfer_allowed_during_active_loan_exposure() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    // 80% of the pool is out on loan.
+    t.client().fund_loan(&t.creditline, &merchant, &800);
+
+    t.client().transfer(&seller, &buyer, &600);
+
+    // Shares are a pool-wide claim, so ownership moves freely while loans are
+    // outstanding — exposure is enforced at withdrawal time instead.
+    assert_eq!(t.client().get_lp_shares(&seller), 400);
+    assert_eq!(t.client().get_lp_shares(&buyer), 600);
+
+    let stats = t.client().get_pool_stats();
+    assert_eq!(stats.locked_liquidity, 800);
+    assert_eq!(stats.available_liquidity, 200);
+    assert_eq!(stats.total_shares, 1_000);
+}
+
+#[test]
+fn test_transferred_shares_withdraw_up_to_available_liquidity() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.client().fund_loan(&t.creditline, &merchant, &800);
+    t.client().transfer(&seller, &buyer, &600);
+
+    // The buyer inherits the same liquidity constraint the seller had.
+    let returned = t.client().withdraw(&buyer, &200);
+
+    assert_eq!(returned, 200);
+    assert_eq!(t.token().balance(&buyer), 200);
+    assert_eq!(t.client().get_lp_shares(&buyer), 400);
+    assert_eq!(t.client().get_pool_stats().available_liquidity, 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_transferred_shares_cannot_drain_locked_liquidity() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.client().fund_loan(&t.creditline, &merchant, &800);
+    t.client().transfer(&seller, &buyer, &600);
+
+    // Only 200 is available — a transfer cannot unlock loaned-out liquidity.
+    t.client().withdraw(&buyer, &600);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_seller_cannot_withdraw_transferred_shares() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &1_000);
+
+    t.client().withdraw(&seller, &1);
+}
+
+#[test]
+fn test_buyer_receives_interest_accrued_after_transfer() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    t.client().transfer(&seller, &buyer, &1_000);
+
+    // 100 interest → 85 stays in the pool and lifts the share price.
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.admin, &100);
+
+    let returned = t.client().withdraw(&buyer, &1_000);
+
+    assert_eq!(returned, 1_085);
+    assert_eq!(t.token().balance(&buyer), 1_085);
+    assert_eq!(t.token().balance(&seller), 0);
+}
+
+#[test]
+fn test_transfer_at_elevated_share_price_moves_full_value() {
+    let t = TestEnv::setup();
+    let seller = t.provider_with_shares(1_000);
+    let buyer = Address::generate(&t.env);
+
+    // Share price rises before the sale.
+    t.mint(&t.contract_id, 100);
+    t.client().distribute_interest(&t.admin, &100);
+    assert_eq!(t.client().get_pool_stats().share_price, 10_850);
+
+    t.client().transfer(&seller, &buyer, &400);
+
+    // Shares are valued at the current price, whoever holds them.
+    assert_eq!(t.client().calculate_withdrawal(&400), 434);
+    assert_eq!(t.client().withdraw(&buyer, &400), 434);
+    assert_eq!(t.client().withdraw(&seller, &600), 651);
+}
+
+#[test]
+fn test_transfer_chain_preserves_total_shares() {
+    let t = TestEnv::setup();
+    let first = t.provider_with_shares(1_000);
+    let second = Address::generate(&t.env);
+    let third = Address::generate(&t.env);
+
+    t.client().transfer(&first, &second, &600);
+    t.client().transfer(&second, &third, &250);
+    t.client().transfer(&third, &first, &100);
+
+    assert_eq!(t.client().get_lp_shares(&first), 500);
+    assert_eq!(t.client().get_lp_shares(&second), 350);
+    assert_eq!(t.client().get_lp_shares(&third), 150);
+    assert_eq!(t.client().get_pool_stats().total_shares, 1_000);
 }

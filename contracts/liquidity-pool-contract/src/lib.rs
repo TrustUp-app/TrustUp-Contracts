@@ -229,6 +229,95 @@ impl LiquidityPoolContract {
     }
 
     // -------------------------------------------------------------------------
+    // Share Transfers (SEP-41-style secondary market)
+    // -------------------------------------------------------------------------
+    //
+    // LP shares are a fungible, pool-wide claim: a share entitles its holder to
+    // `total_liquidity / total_shares` tokens, never to a specific loan. Moving
+    // shares between holders therefore leaves `total_shares`, `total_liquidity`
+    // and `locked_liquidity` untouched — only the owner of the claim changes.
+    // Loan exposure is enforced where value actually leaves the pool
+    // (`withdraw`, which is capped by available liquidity), so transfers stay
+    // available while loans are outstanding instead of freezing every LP's
+    // position. See the contract README for the full rationale.
+
+    /// Allow `spender` to move up to `amount` of `from`'s shares until
+    /// `expiration_ledger` (inclusive). Overwrites any previous allowance.
+    ///
+    /// Passing `amount == 0` revokes an existing allowance.
+    pub fn approve(
+        env: Env,
+        from: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
+        from.require_auth();
+
+        if amount < 0 {
+            panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if amount > 0 {
+            // A live allowance cannot expire in the past…
+            if expiration_ledger < current_ledger {
+                panic_with_error!(&env, LiquidityPoolError::InvalidExpirationLedger);
+            }
+            // …nor outlive the maximum TTL the network will store it for.
+            let live_for = expiration_ledger - current_ledger;
+            if live_for > env.storage().max_ttl() {
+                panic_with_error!(&env, LiquidityPoolError::InvalidExpirationLedger);
+            }
+        }
+
+        storage::set_allowance(&env, &from, &spender, amount, expiration_ledger);
+        events::emit_approval(&env, &from, &spender, amount, expiration_ledger);
+        storage::bump_instance(&env);
+    }
+
+    /// Shares `spender` may still move on behalf of `from`.
+    /// Returns 0 once the allowance has expired.
+    pub fn allowance(env: Env, from: Address, spender: Address) -> i128 {
+        storage::get_allowance(&env, &from, &spender).amount
+    }
+
+    /// Move `amount` shares from `from` to `to`.
+    ///
+    /// Pool accounting is unchanged: this is a pure reassignment of ownership.
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        from.require_auth();
+        Self::require_not_paused(&env);
+
+        if amount < types::MIN_AMOUNT {
+            panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
+        }
+
+        Self::enter_non_reentrant(&env);
+        Self::move_shares(&env, &from, &to, amount);
+        events::emit_share_transferred(&env, &from, &to, amount);
+        storage::bump_instance(&env);
+        Self::exit_non_reentrant(&env);
+    }
+
+    /// Move `amount` shares from `from` to `to`, spending `spender`'s allowance.
+    pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        spender.require_auth();
+        Self::require_not_paused(&env);
+
+        if amount < types::MIN_AMOUNT {
+            panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
+        }
+
+        Self::enter_non_reentrant(&env);
+        Self::spend_allowance(&env, &from, &spender, amount);
+        Self::move_shares(&env, &from, &to, amount);
+        events::emit_share_transferred(&env, &from, &to, amount);
+        storage::bump_instance(&env);
+        Self::exit_non_reentrant(&env);
+    }
+
+    // -------------------------------------------------------------------------
     // CreditLine Operations (access-restricted)
     // -------------------------------------------------------------------------
 
@@ -496,6 +585,49 @@ impl LiquidityPoolContract {
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /// Single place where share ownership moves — every transfer path goes
+    /// through it, so the share-accounting invariants hold by construction:
+    /// `total_shares` is untouched and the sum of balances is preserved.
+    fn move_shares(env: &Env, from: &Address, to: &Address, amount: i128) {
+        let from_shares = storage::get_lp_shares(env, from);
+        if from_shares < amount {
+            panic_with_error!(env, LiquidityPoolError::InsufficientShares);
+        }
+
+        // A self-transfer is a no-op on balances. Skipping the writes avoids
+        // reading `to` before `from` is written back, which would otherwise
+        // mint `amount` shares out of thin air.
+        if from != to {
+            let new_from_shares = from_shares
+                .checked_sub(amount)
+                .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Underflow));
+            let new_to_shares = storage::get_lp_shares(env, to)
+                .checked_add(amount)
+                .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Overflow));
+
+            storage::set_lp_shares(env, from, new_from_shares);
+            storage::set_lp_shares(env, to, new_to_shares);
+        }
+
+        storage::bump_lp_shares(env, from);
+        storage::bump_lp_shares(env, to);
+    }
+
+    /// Deduct `amount` from the allowance `from` granted `spender`, keeping the
+    /// original expiration ledger.
+    fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
+        let allowance = storage::get_allowance(env, from, spender);
+        if allowance.amount < amount {
+            panic_with_error!(env, LiquidityPoolError::InsufficientAllowance);
+        }
+
+        let remaining = allowance
+            .amount
+            .checked_sub(amount)
+            .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Underflow));
+        storage::set_allowance(env, from, spender, remaining, allowance.expiration_ledger);
+    }
 
     fn require_not_paused(env: &Env) {
         if storage::is_paused(env) {

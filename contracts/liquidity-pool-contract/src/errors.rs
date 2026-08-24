@@ -16,4 +16,6 @@ pub enum LiquidityPoolError {
     ZeroTotalShares = 10,
     ReentrancyDetected = 11,
     ContractPaused = 12,
+    InsufficientAllowance = 13,
+    InvalidExpirationLedger = 14,
 }
