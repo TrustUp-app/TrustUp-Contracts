@@ -1,6 +1,6 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
-use crate::types::{AllowanceKey, AllowanceValue};
+use crate::types::{AllowanceKey, AllowanceValue, RateParams};
 
 // Instance storage keys
 pub const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
@@ -13,6 +13,7 @@ pub const TREASURY_KEY: Symbol = symbol_short!("TREASURY");
 pub const MERCHANT_FUND_KEY: Symbol = symbol_short!("MRCHFND");
 pub const REENTRANCY_LOCK_KEY: Symbol = symbol_short!("LOCKED");
 pub const PAUSED_KEY: Symbol = symbol_short!("PAUSED");
+pub const RATE_PARAMS_KEY: Symbol = symbol_short!("RATEPARM");
 
 // Persistent storage key prefix for LP shares
 pub const LP_SHARES_PREFIX: Symbol = symbol_short!("LPSHRS");
@@ -217,6 +218,16 @@ pub fn set_allowance(
                 .extend_ttl(&key, live_for, live_for);
         }
     }
+}
+
+// --- Interest Rate Curve Parameters ---
+
+pub fn get_rate_params(env: &Env) -> Option<RateParams> {
+    env.storage().instance().get(&RATE_PARAMS_KEY)
+}
+
+pub fn set_rate_params(env: &Env, params: &RateParams) {
+    env.storage().instance().set(&RATE_PARAMS_KEY, params);
 }
 
 pub fn is_reentrancy_locked(env: &Env) -> bool {

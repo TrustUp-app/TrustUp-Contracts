@@ -8,7 +8,7 @@ mod storage;
 mod types;
 
 pub use errors::LiquidityPoolError;
-pub use types::PoolStats;
+pub use types::{PoolStats, RateParams};
 
 #[contract]
 pub struct LiquidityPoolContract;
@@ -41,6 +41,18 @@ impl LiquidityPoolContract {
         storage::set_token(&env, &token);
         storage::set_treasury(&env, &treasury);
         storage::set_merchant_fund(&env, &merchant_fund);
+
+        // Seed the default utilization-based rate curve so the pool always has a
+        // well-formed model; governance can retune it later via `set_rate_params`.
+        storage::set_rate_params(
+            &env,
+            &types::RateParams {
+                base_rate_bps: types::DEFAULT_BASE_RATE_BPS,
+                slope1_bps: types::DEFAULT_SLOPE1_BPS,
+                slope2_bps: types::DEFAULT_SLOPE2_BPS,
+                optimal_utilization_bps: types::DEFAULT_OPTIMAL_UTILIZATION_BPS,
+            },
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -89,6 +101,100 @@ impl LiquidityPoolContract {
 
     pub fn is_paused(env: Env) -> bool {
         storage::is_paused(&env)
+    }
+
+    // -------------------------------------------------------------------------
+    // Utilization-based interest rate model (Aave-style kinked curve)
+    // -------------------------------------------------------------------------
+
+    /// Governance-gated update of the rate curve parameters. All values are bps
+    /// (10000 = 100%). `optimal_utilization_bps` must be strictly inside
+    /// (0, 10000); slopes and base must be non-negative.
+    pub fn set_rate_params(
+        env: Env,
+        admin: Address,
+        base_rate_bps: i128,
+        slope1_bps: i128,
+        slope2_bps: i128,
+        optimal_utilization_bps: i128,
+    ) {
+        admin.require_auth();
+        access::require_admin(&env, &admin);
+
+        if base_rate_bps < 0
+            || slope1_bps < 0
+            || slope2_bps < 0
+            || optimal_utilization_bps <= 0
+            || optimal_utilization_bps >= types::TOTAL_BPS
+        {
+            panic_with_error!(&env, LiquidityPoolError::InvalidRateParams);
+        }
+
+        storage::set_rate_params(
+            &env,
+            &types::RateParams {
+                base_rate_bps,
+                slope1_bps,
+                slope2_bps,
+                optimal_utilization_bps,
+            },
+        );
+        events::emit_rate_params_updated(
+            &env,
+            base_rate_bps,
+            slope1_bps,
+            slope2_bps,
+            optimal_utilization_bps,
+        );
+        storage::bump_instance(&env);
+    }
+
+    /// Current rate curve parameters (defaults if never set).
+    pub fn get_rate_params(env: Env) -> RateParams {
+        Self::rate_params(&env)
+    }
+
+    /// Current pool utilization in bps: `locked_liquidity / total_liquidity`.
+    /// Returns 0 for an empty pool.
+    pub fn get_utilization_bps(env: Env) -> i128 {
+        Self::utilization_bps_internal(&env)
+    }
+
+    /// Borrow rate (bps) for the pool's *current* utilization.
+    pub fn get_current_rate_bps(env: Env) -> i128 {
+        let params = Self::rate_params(&env);
+        let utilization = Self::utilization_bps_internal(&env);
+        Self::compute_rate_bps(&env, &params, utilization)
+    }
+
+    /// Borrow rate (bps) at a hypothetical `utilization_bps` (0..=10000), using
+    /// the current curve. Pure view — useful for quoting and off-chain UIs.
+    pub fn quote_rate_bps(env: Env, utilization_bps: i128) -> i128 {
+        let params = Self::rate_params(&env);
+        Self::compute_rate_bps(&env, &params, utilization_bps)
+    }
+
+    /// Interest owed on `principal` at the current utilization-based rate, after
+    /// applying a reputation-based discount (bps) supplied by `creditline-contract`.
+    /// The effective rate is floored at `base_rate` so a discount can never push
+    /// borrowing below the base cost. This is the wiring point CreditLine calls
+    /// instead of the legacy fixed `base_interest_bps`.
+    pub fn quote_interest(env: Env, principal: i128, reputation_discount_bps: i128) -> i128 {
+        if principal < 0 || reputation_discount_bps < 0 {
+            panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
+        }
+
+        let params = Self::rate_params(&env);
+        let utilization = Self::utilization_bps_internal(&env);
+        let rate = Self::compute_rate_bps(&env, &params, utilization);
+
+        // Reputation discount lowers the rate, but never below the base rate.
+        let effective_rate = (rate - reputation_discount_bps).max(params.base_rate_bps);
+
+        principal
+            .checked_mul(effective_rate)
+            .and_then(|v| v.checked_div(types::TOTAL_BPS))
+            .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow))
     }
 
     // -------------------------------------------------------------------------
@@ -627,6 +733,67 @@ impl LiquidityPoolContract {
             .checked_sub(amount)
             .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Underflow));
         storage::set_allowance(env, from, spender, remaining, allowance.expiration_ledger);
+    }
+
+    /// Rate curve parameters, falling back to the compiled-in defaults for a
+    /// pool that predates the rate model (none created without `initialize`).
+    fn rate_params(env: &Env) -> types::RateParams {
+        storage::get_rate_params(env).unwrap_or(types::RateParams {
+            base_rate_bps: types::DEFAULT_BASE_RATE_BPS,
+            slope1_bps: types::DEFAULT_SLOPE1_BPS,
+            slope2_bps: types::DEFAULT_SLOPE2_BPS,
+            optimal_utilization_bps: types::DEFAULT_OPTIMAL_UTILIZATION_BPS,
+        })
+    }
+
+    /// Utilization in bps = `locked_liquidity * 10000 / total_liquidity`, 0 when
+    /// the pool is empty.
+    fn utilization_bps_internal(env: &Env) -> i128 {
+        let total = storage::get_total_liquidity(env);
+        if total <= 0 {
+            return 0;
+        }
+        let locked = storage::get_locked_liquidity(env);
+        locked
+            .checked_mul(types::TOTAL_BPS)
+            .and_then(|v| v.checked_div(total))
+            .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Overflow))
+    }
+
+    /// The kinked rate curve, in bps, for a given utilization (clamped to
+    /// 0..=10000). Below the kink the rate rises with `slope1`; above it, the
+    /// portion beyond `optimal` rises with the steeper `slope2`:
+    ///
+    /// ```text
+    /// u <= optimal: base + slope1 * u / 10000
+    /// u >  optimal: base + slope1 * optimal / 10000 + slope2 * (u - optimal) / 10000
+    /// ```
+    fn compute_rate_bps(env: &Env, params: &types::RateParams, utilization_bps: i128) -> i128 {
+        let u = utilization_bps.max(0).min(types::TOTAL_BPS);
+        let optimal = params.optimal_utilization_bps;
+
+        let scaled = |slope: i128, span: i128| -> i128 {
+            slope
+                .checked_mul(span)
+                .and_then(|v| v.checked_div(types::TOTAL_BPS))
+                .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Overflow))
+        };
+
+        if u <= optimal {
+            let inc = scaled(params.slope1_bps, u);
+            params
+                .base_rate_bps
+                .checked_add(inc)
+                .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Overflow))
+        } else {
+            let inc1 = scaled(params.slope1_bps, optimal);
+            let inc2 = scaled(params.slope2_bps, u - optimal);
+            params
+                .base_rate_bps
+                .checked_add(inc1)
+                .and_then(|v| v.checked_add(inc2))
+                .unwrap_or_else(|| panic_with_error!(env, LiquidityPoolError::Overflow))
+        }
     }
 
     fn require_not_paused(env: &Env) {

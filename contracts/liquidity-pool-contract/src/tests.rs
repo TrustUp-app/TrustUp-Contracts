@@ -3445,3 +3445,178 @@ fn test_transfer_chain_preserves_total_shares() {
     assert_eq!(t.client().get_lp_shares(&third), 150);
     assert_eq!(t.client().get_pool_stats().total_shares, 1_000);
 }
+
+// ─── Utilization-based dynamic interest rate model (issue #94) ──────────────────
+//
+// Default curve seeded at initialize: base = 200, slope1 = 400, slope2 = 6000,
+// optimal = 8000 (bps). Rate (bps) for utilization u (bps):
+//   u <= 8000: 200 + 400 * u / 10000
+//   u >  8000: 200 + 400 * 8000 / 10000 + 6000 * (u - 8000) / 10000
+
+#[test]
+fn test_default_rate_params_after_init() {
+    let t = TestEnv::setup();
+    let p = t.client().get_rate_params();
+    assert_eq!(p.base_rate_bps, 200);
+    assert_eq!(p.slope1_bps, 400);
+    assert_eq!(p.slope2_bps, 6000);
+    assert_eq!(p.optimal_utilization_bps, 8000);
+}
+
+#[test]
+fn test_rate_curve_precision_across_utilization() {
+    let t = TestEnv::setup();
+    let c = t.client();
+    // 0%, below-kink, at-kink, above-kink, 100%
+    assert_eq!(c.quote_rate_bps(&0), 200);
+    assert_eq!(c.quote_rate_bps(&4_000), 360);
+    assert_eq!(c.quote_rate_bps(&8_000), 520);
+    assert_eq!(c.quote_rate_bps(&9_000), 1_120);
+    assert_eq!(c.quote_rate_bps(&10_000), 1_720);
+}
+
+#[test]
+fn test_rate_curve_is_continuous_at_kink() {
+    let t = TestEnv::setup();
+    let c = t.client();
+    // Just below and just above the kink meet at the kink value (520).
+    assert_eq!(c.quote_rate_bps(&7_999), 519);
+    assert_eq!(c.quote_rate_bps(&8_000), 520);
+    assert_eq!(c.quote_rate_bps(&8_001), 520);
+}
+
+#[test]
+fn test_quote_rate_clamps_out_of_range_utilization() {
+    let t = TestEnv::setup();
+    let c = t.client();
+    assert_eq!(c.quote_rate_bps(&-5_000), 200); // clamped to 0
+    assert_eq!(c.quote_rate_bps(&20_000), 1_720); // clamped to 10000
+}
+
+#[test]
+fn test_utilization_and_current_rate_from_pool_state() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+
+    // Empty of loans: 0% utilization → base rate.
+    assert_eq!(t.client().get_utilization_bps(), 0);
+    assert_eq!(t.client().get_current_rate_bps(), 200);
+
+    // Lock 40% → utilization 4000 bps → rate 360.
+    t.client().fund_loan(&t.creditline, &merchant, &400);
+    assert_eq!(t.client().get_utilization_bps(), 4_000);
+    assert_eq!(t.client().get_current_rate_bps(), 360);
+}
+
+#[test]
+fn test_utilization_precision_at_large_scale() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    let total: i128 = 1_000_000_000_000_000_000; // 1e18
+    let locked: i128 = 800_000_000_000_000_000; // 8e17 → 80%
+    t.mint(&provider, total);
+    t.client().deposit(&provider, &total);
+    t.client().fund_loan(&t.creditline, &merchant, &locked);
+    assert_eq!(t.client().get_utilization_bps(), 8_000);
+    assert_eq!(t.client().get_current_rate_bps(), 520);
+}
+
+#[test]
+fn test_set_rate_params_updates_curve() {
+    let t = TestEnv::setup();
+    // base 100, slope1 900, slope2 5000, optimal 9000
+    t.client()
+        .set_rate_params(&t.admin, &100, &900, &5_000, &9_000);
+    let p = t.client().get_rate_params();
+    assert_eq!(p.base_rate_bps, 100);
+    assert_eq!(p.optimal_utilization_bps, 9_000);
+    // u=9000 (at new kink): 100 + 900*9000/10000 = 100 + 810 = 910
+    assert_eq!(t.client().quote_rate_bps(&9_000), 910);
+    // u=10000: 910 + 5000*(1000)/10000 = 910 + 500 = 1410
+    assert_eq!(t.client().quote_rate_bps(&10_000), 1_410);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn test_set_rate_params_non_admin_fails() {
+    let t = TestEnv::setup();
+    let intruder = Address::generate(&t.env);
+    t.client()
+        .set_rate_params(&intruder, &100, &900, &5_000, &9_000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_set_rate_params_rejects_zero_optimal() {
+    let t = TestEnv::setup();
+    t.client().set_rate_params(&t.admin, &200, &400, &6_000, &0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_set_rate_params_rejects_full_optimal() {
+    let t = TestEnv::setup();
+    t.client()
+        .set_rate_params(&t.admin, &200, &400, &6_000, &10_000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_set_rate_params_rejects_negative_slope() {
+    let t = TestEnv::setup();
+    t.client()
+        .set_rate_params(&t.admin, &200, &-1, &6_000, &8_000);
+}
+
+#[test]
+fn test_quote_interest_applies_utilization_rate() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+    t.client().fund_loan(&t.creditline, &merchant, &400); // u=4000 → rate 360
+
+    // No discount: 1_000_000 * 360 / 10000 = 36_000
+    assert_eq!(t.client().quote_interest(&1_000_000, &0), 36_000);
+    // Reputation discount of 100 bps → effective 260 → 26_000
+    assert_eq!(t.client().quote_interest(&1_000_000, &100), 26_000);
+}
+
+#[test]
+fn test_quote_interest_discount_floored_at_base_rate() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+    t.client().fund_loan(&t.creditline, &merchant, &400); // rate 360
+
+    // An oversized discount cannot push the rate below base (200): 1e6*200/1e4
+    assert_eq!(t.client().quote_interest(&1_000_000, &100_000), 20_000);
+}
+
+#[test]
+fn test_quote_interest_zero_principal() {
+    let t = TestEnv::setup();
+    assert_eq!(t.client().quote_interest(&0, &0), 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_quote_interest_negative_principal_fails() {
+    let t = TestEnv::setup();
+    t.client().quote_interest(&-1, &0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_quote_interest_overflow_extreme_principal() {
+    let t = TestEnv::setup();
+    // principal * rate overflows i128 (rate >= base_rate = 200 > 1).
+    t.client().quote_interest(&i128::MAX, &0);
+}
