@@ -360,14 +360,23 @@ impl LiquidityPoolContract {
 
     /// Receive a loan repayment (principal + interest) from CreditLine.
     ///
-    /// `principal` reduces locked_liquidity (loan is repaid).
-    /// `interest`  is distributed via `distribute_interest` (increases pool value).
-    pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128) {
+    /// `principal` is tokens of principal pulled from CreditLine.
+    /// `unlock` is how much of that principal was actually pool-funded and
+    /// should reduce `locked_liquidity`. Any excess (`principal - unlock`) is
+    /// the guarantee slice and is added to `total_liquidity` instead.
+    /// `interest` is distributed via `distribute_interest`.
+    pub fn receive_repayment(
+        env: Env,
+        creditline: Address,
+        principal: i128,
+        interest: i128,
+        unlock: i128,
+    ) {
         creditline.require_auth();
         access::require_creditline(&env, &creditline);
         Self::require_not_paused(&env);
 
-        if principal < 0 || interest < 0 {
+        if principal < 0 || interest < 0 || unlock < 0 || unlock > principal {
             panic_with_error!(&env, LiquidityPoolError::InvalidAmount);
         }
 
@@ -380,14 +389,23 @@ impl LiquidityPoolContract {
         }
         Self::enter_non_reentrant(&env);
 
-        // Decrease locked liquidity by the principal
         let locked = storage::get_locked_liquidity(&env);
         let new_locked = locked
-            .checked_sub(principal)
+            .checked_sub(unlock)
             .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Underflow));
         storage::set_locked_liquidity(&env, new_locked);
 
-        // Pull funds from CreditLine after accounting changes.
+        let extra_principal = principal
+            .checked_sub(unlock)
+            .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Underflow));
+        if extra_principal > 0 {
+            let total_liquidity = storage::get_total_liquidity(&env);
+            let new_total = total_liquidity
+                .checked_add(extra_principal)
+                .unwrap_or_else(|| panic_with_error!(&env, LiquidityPoolError::Overflow));
+            storage::set_total_liquidity(&env, new_total);
+        }
+
         let token = storage::get_token(&env);
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&creditline, &env.current_contract_address(), &total);

@@ -154,7 +154,7 @@ fn test_deposit_after_interest_increases_share_value() {
     // We inject interest by sending tokens to the pool and calling receive_repayment
     // with principal=0, interest=100.
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     // Now total_liquidity includes the LP portion (85) of interest.
     // Pool: total_liquidity = 1000 + 85 = 1085, total_shares = 1000
@@ -232,7 +232,7 @@ fn test_withdrawal_reflects_share_appreciation() {
 
     // Distribute 100 interest (85 stays in pool)
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     // Total_liquidity = 1085, total_shares = 1000
     // Withdraw all 1000 shares → should receive 1085 tokens
@@ -329,7 +329,7 @@ fn test_receive_repayment_decreases_locked_and_distributes_interest() {
 
     // Repay 400 principal + 40 interest
     t.mint(&t.creditline, 440);
-    t.client().receive_repayment(&t.creditline, &400, &40);
+    t.client().receive_repayment(&t.creditline, &400, &40, &400);
 
     let stats = t.client().get_pool_stats();
     assert_eq!(stats.locked_liquidity, 0);
@@ -349,7 +349,7 @@ fn test_receive_repayment_treasury_receives_protocol_fee() {
 
     // Send 100 interest
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     // Treasury gets 10% = 10
     let treasury_balance = t.token().balance(&t.treasury);
@@ -365,7 +365,7 @@ fn test_receive_repayment_merchant_fund_receives_fee() {
 
     // Send 100 interest
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     // Merchant fund gets 5% = 5
     let mf_balance = t.token().balance(&t.merchant_fund);
@@ -386,21 +386,21 @@ fn test_double_counting_does_not_compound_across_multiple_loan_cycles() {
     // Cycle 1
     t.client().fund_loan(&t.creditline, &merchant, &600);
     t.mint(&t.creditline, 600);
-    t.client().receive_repayment(&t.creditline, &600, &0);
+    t.client().receive_repayment(&t.creditline, &600, &0, &600);
 
     assert_eq!(t.client().get_pool_stats().total_liquidity, 1_000);
 
     // Cycle 2
     t.client().fund_loan(&t.creditline, &merchant, &600);
     t.mint(&t.creditline, 600);
-    t.client().receive_repayment(&t.creditline, &600, &0);
+    t.client().receive_repayment(&t.creditline, &600, &0, &600);
 
     assert_eq!(t.client().get_pool_stats().total_liquidity, 1_000);
 
     // Cycle 3
     t.client().fund_loan(&t.creditline, &merchant, &600);
     t.mint(&t.creditline, 600);
-    t.client().receive_repayment(&t.creditline, &600, &0);
+    t.client().receive_repayment(&t.creditline, &600, &0, &600);
 
     assert_eq!(t.client().get_pool_stats().total_liquidity, 1_000);
 
@@ -420,7 +420,7 @@ fn test_distribute_interest_fee_split_accuracy() {
     t.client().deposit(&provider, &10_000);
 
     t.mint(&t.creditline, 1_000);
-    t.client().receive_repayment(&t.creditline, &0, &1_000);
+    t.client().receive_repayment(&t.creditline, &0, &1_000, &0);
 
     // LP: 850 stays in pool → total_liquidity = 10000 + 850 = 10850
     let stats = t.client().get_pool_stats();
@@ -449,7 +449,7 @@ fn test_distribute_interest_share_value_appreciation() {
 
     // Distribute 80 tokens of interest (8% on 1000)
     t.mint(&t.creditline, 80);
-    t.client().receive_repayment(&t.creditline, &0, &80);
+    t.client().receive_repayment(&t.creditline, &0, &80, &0);
 
     let stats_after = t.client().get_pool_stats();
     // lp_amount = 80 * 8500 / 10000 = 68
@@ -473,7 +473,7 @@ fn test_multiple_lp_proportional_distribution() {
 
     // 200 interest distributed (100 per LP proportionally)
     t.mint(&t.creditline, 200);
-    t.client().receive_repayment(&t.creditline, &0, &200);
+    t.client().receive_repayment(&t.creditline, &0, &200, &0);
 
     // LP amount = 85% of 200 = 170 → added to pool
     // total_liquidity = 2000 + 170 = 2170, total_shares = 2000
@@ -497,7 +497,7 @@ fn test_interest_calculation_accuracy_small_amount() {
     t.client().deposit(&provider, &1_000);
 
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     assert_eq!(t.token().balance(&t.treasury), 10);
     assert_eq!(t.token().balance(&t.merchant_fund), 5);
@@ -518,7 +518,7 @@ fn test_interest_rounding_remainder_goes_to_lp() {
     t.client().deposit(&provider, &10_000);
 
     t.mint(&t.creditline, 101);
-    t.client().receive_repayment(&t.creditline, &0, &101);
+    t.client().receive_repayment(&t.creditline, &0, &101, &0);
 
     assert_eq!(t.token().balance(&t.treasury), 10);
     assert_eq!(t.token().balance(&t.merchant_fund), 6); // remainder goes here
@@ -698,7 +698,7 @@ fn test_withdraw_succeeds_after_loan_repayment_unlocks_liquidity() {
 
     // Creditline repays 600 principal (no interest).
     t.mint(&t.creditline, 600);
-    t.client().receive_repayment(&t.creditline, &600, &0);
+    t.client().receive_repayment(&t.creditline, &600, &0, &600);
 
     // Locked must be zero; all liquidity available.
     let stats_after = t.client().get_pool_stats();
@@ -792,9 +792,12 @@ fn test_share_calculation_accuracy() {
     // 4. Test rounding behavior with small deposit after interest
     // Simulate interest distribution
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     let stats_after = context.client().get_pool_stats();
     assert_eq!(
@@ -1155,9 +1158,12 @@ fn test_share_value_appreciation_over_time() {
     // 3. Distribute interest multiple times
     // First interest
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // 4. Verify share_price increases after first distribution
     let stats_after_first = context.client().get_pool_stats();
@@ -1172,9 +1178,12 @@ fn test_share_value_appreciation_over_time() {
 
     // Second interest
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // Verify share_price increases after second distribution
     let stats_after_second = context.client().get_pool_stats();
@@ -1189,9 +1198,12 @@ fn test_share_value_appreciation_over_time() {
 
     // Third interest
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // Verify share_price increases after third distribution
     let stats_after_third = context.client().get_pool_stats();
@@ -1313,9 +1325,12 @@ fn test_small_deposit_rounding() {
 
     // 2. Distribute interest to increase share_price
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // Verify share_price increased
     let stats = context.client().get_pool_stats();
@@ -1407,9 +1422,12 @@ fn test_concurrent_deposits_and_withdrawals() {
 
     // 3. Distribute interest between operations
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // 4. Verify pool stats remain consistent throughout
     let stats3 = context.client().get_pool_stats();
@@ -1553,9 +1571,12 @@ fn test_repayment_increases_pool_value() {
 
     // 3. Simulate repayment with principal + interest
     context.mint(&context.creditline, total_repayment);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // 4. Verify locked_liquidity decreased by principal amount
     let after_repayment_stats = context.client().get_pool_stats();
@@ -1713,9 +1734,12 @@ fn test_withdrawal_calculation_precision() {
     // 5. Test with edge cases (very small/large amounts, after interest, etc.)
     // Distribute interest
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     let stats = context.client().get_pool_stats();
     assert_eq!(stats.total_liquidity, expected_liquidity_after_interest);
@@ -1778,9 +1802,12 @@ fn test_share_price_calculation() {
 
     // 3. After interest: share_price should increase proportionally
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     let after_interest_stats = context.client().get_pool_stats();
     assert_eq!(
@@ -1809,6 +1836,7 @@ fn test_share_price_calculation() {
             &context.creditline,
             &principal_repayment,
             &loop_interest_amount,
+            &principal_repayment,
         );
     }
 
@@ -1851,9 +1879,12 @@ fn test_multiple_interest_distributions() {
 
     // 2. Distribute interest event 1
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // 3. Verify share_price increase
     let stats1 = context.client().get_pool_stats();
@@ -1862,9 +1893,12 @@ fn test_multiple_interest_distributions() {
 
     // 4. Distribute interest event 2
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     // 5. Verify share_price compounds correctly
     let stats2 = context.client().get_pool_stats();
@@ -1873,27 +1907,36 @@ fn test_multiple_interest_distributions() {
 
     // 6. Continue for several events
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     let stats3 = context.client().get_pool_stats();
     assert_eq!(stats3.total_liquidity, expected_liquidity_after_event3);
     assert_eq!(stats3.share_price, expected_share_price_after_event3);
 
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     let stats4 = context.client().get_pool_stats();
     assert_eq!(stats4.total_liquidity, expected_liquidity_after_event4);
     assert_eq!(stats4.share_price, expected_share_price_after_event4);
 
     context.mint(&context.creditline, interest_amount);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &interest_amount);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &interest_amount,
+        &principal_repayment,
+    );
 
     let stats5 = context.client().get_pool_stats();
     assert_eq!(stats5.total_liquidity, expected_liquidity_after_event5);
@@ -1930,6 +1973,7 @@ fn test_zero_shares_edge_case() {
             &context.creditline,
             &principal_repayment,
             &interest_amount,
+            &principal_repayment,
         );
     }
 
@@ -1980,9 +2024,12 @@ fn test_maximum_values_handling() {
 
     // 4. Test interest distribution with large amounts
     context.mint(&context.creditline, large_interest);
-    context
-        .client()
-        .receive_repayment(&context.creditline, &principal_repayment, &large_interest);
+    context.client().receive_repayment(
+        &context.creditline,
+        &principal_repayment,
+        &large_interest,
+        &principal_repayment,
+    );
 
     let stats_after_interest = context.client().get_pool_stats();
     assert_eq!(
@@ -2016,7 +2063,7 @@ fn test_set_treasury() {
     t.client().deposit(&provider, &1_000);
 
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     let new_treasury_balance = t.token().balance(&new_treasury);
     assert_eq!(new_treasury_balance, 10); // 10% of 100
@@ -2045,7 +2092,7 @@ fn test_set_merchant_fund() {
     t.client().deposit(&provider, &1_000);
 
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     let new_merchant_fund_balance = t.token().balance(&new_merchant_fund);
     assert_eq!(new_merchant_fund_balance, 5); // 5% of 100
@@ -2079,7 +2126,7 @@ fn test_receive_repayment_with_zero_principal() {
 
     // Repay with only interest, no principal
     t.mint(&t.creditline, 50);
-    t.client().receive_repayment(&t.creditline, &0, &50);
+    t.client().receive_repayment(&t.creditline, &0, &50, &0);
 
     let stats_after = t.client().get_pool_stats();
     // Locked should remain unchanged
@@ -2101,7 +2148,7 @@ fn test_receive_repayment_with_zero_interest() {
 
     // Repay with only principal, no interest
     t.mint(&t.creditline, 500);
-    t.client().receive_repayment(&t.creditline, &500, &0);
+    t.client().receive_repayment(&t.creditline, &500, &0, &500);
 
     let stats = t.client().get_pool_stats();
     // Locked should be reduced to zero
@@ -2114,14 +2161,16 @@ fn test_receive_repayment_with_zero_interest() {
 #[should_panic(expected = "Error(Contract, #4)")]
 fn test_receive_repayment_negative_principal_fails() {
     let t = TestEnv::setup();
-    t.client().receive_repayment(&t.creditline, &-100, &50);
+    t.client()
+        .receive_repayment(&t.creditline, &-100, &50, &-100);
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #4)")]
 fn test_receive_repayment_negative_interest_fails() {
     let t = TestEnv::setup();
-    t.client().receive_repayment(&t.creditline, &100, &-50);
+    t.client()
+        .receive_repayment(&t.creditline, &100, &-50, &100);
 }
 
 #[test]
@@ -2129,7 +2178,32 @@ fn test_receive_repayment_negative_interest_fails() {
 fn test_receive_repayment_unauthorized_caller_fails() {
     let t = TestEnv::setup();
     let intruder = Address::generate(&t.env);
-    t.client().receive_repayment(&intruder, &100, &50);
+    t.client().receive_repayment(&intruder, &100, &50, &100);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_receive_repayment_unlock_exceeds_principal_fails() {
+    let t = TestEnv::setup();
+    t.client().receive_repayment(&t.creditline, &100, &0, &101);
+}
+
+#[test]
+fn test_receive_repayment_extra_principal_credits_liquidity_not_negative_lock() {
+    let t = TestEnv::setup();
+    let provider = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
+    t.client().fund_loan(&t.creditline, &merchant, &800);
+
+    t.mint(&t.creditline, 1_000);
+    t.client()
+        .receive_repayment(&t.creditline, &1_000, &0, &800);
+
+    let stats = t.client().get_pool_stats();
+    assert_eq!(stats.locked_liquidity, 0);
+    assert_eq!(stats.total_liquidity, 1_200);
 }
 
 // ─── receive_guarantee Edge Cases ────────────────────────────────────────────
@@ -2206,7 +2280,7 @@ fn test_fund_loan_with_negative_amount_fails() {
 fn test_receive_repayment_with_zero_total_fails() {
     let t = TestEnv::setup();
     // Both principal and interest are zero - should fail
-    t.client().receive_repayment(&t.creditline, &0, &0);
+    t.client().receive_repayment(&t.creditline, &0, &0, &0);
 }
 
 // ─── Integration Scenarios ───────────────────────────────────────────────────
@@ -2283,7 +2357,8 @@ fn test_complex_lifecycle_deposits_loans_repayments_withdrawals() {
 
     // Partial repayment with interest
     t.mint(&t.creditline, 2_500);
-    t.client().receive_repayment(&t.creditline, &2_000, &500);
+    t.client()
+        .receive_repayment(&t.creditline, &2_000, &500, &2_000);
 
     let stats_mid = t.client().get_pool_stats();
     assert_eq!(stats_mid.locked_liquidity, 2_000);
@@ -2294,7 +2369,8 @@ fn test_complex_lifecycle_deposits_loans_repayments_withdrawals() {
 
     // Complete repayment
     t.mint(&t.creditline, 2_200);
-    t.client().receive_repayment(&t.creditline, &2_000, &200);
+    t.client()
+        .receive_repayment(&t.creditline, &2_000, &200, &2_000);
 
     let stats_final = t.client().get_pool_stats();
     assert_eq!(stats_final.locked_liquidity, 0);
@@ -2314,7 +2390,7 @@ fn test_interest_distribution_with_empty_pool() {
     // Try to distribute interest when pool is empty
     // This should not panic but also not do anything meaningful
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &0, &100);
+    t.client().receive_repayment(&t.creditline, &0, &100, &0);
 
     let stats = t.client().get_pool_stats();
     // With no shares, interest still gets distributed to treasury/merchant fund
@@ -2335,7 +2411,7 @@ fn test_withdrawal_after_multiple_interest_distributions() {
     // Multiple interest distributions
     for _ in 0..5 {
         t.mint(&t.creditline, 100);
-        t.client().receive_repayment(&t.creditline, &0, &100);
+        t.client().receive_repayment(&t.creditline, &0, &100, &0);
     }
 
     // Withdraw all shares
@@ -2438,7 +2514,7 @@ fn test_receive_repayment_blocked_when_paused() {
     let t = TestEnv::setup();
     t.client().pause(&t.admin);
     t.mint(&t.creditline, 100);
-    t.client().receive_repayment(&t.creditline, &100, &0);
+    t.client().receive_repayment(&t.creditline, &100, &0, &100);
 }
 
 #[test]
