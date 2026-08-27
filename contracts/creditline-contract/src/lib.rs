@@ -577,8 +577,16 @@ impl CreditLineContract {
 
         Self::enter_non_reentrant(&env);
 
-        // Payment priority: principal → interest → service fee → late fees
+        // Payment priority: principal → interest → service fee → late fees.
+        // Pool only locked (principal - guarantee). Never unlock more than that.
+        let guarantee = loan.guarantee_amount;
+        let remaining_pool_lock = if loan.principal_outstanding > guarantee {
+            loan.principal_outstanding - guarantee
+        } else {
+            0
+        };
         let principal_paid = amount.min(loan.principal_outstanding);
+        let pool_unlock = principal_paid.min(remaining_pool_lock);
         let after_principal = amount
             .checked_sub(principal_paid)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Underflow));
@@ -630,17 +638,25 @@ impl CreditLineContract {
 
         let token_client = token::Client::new(&env, &token_address);
         token_client.transfer(&borrower, &env.current_contract_address(), &amount);
-        Self::authorize_token_transfer(&env, &token_address, &lp_address, amount);
 
-        let lp_client = LiquidityPoolContractClient::new(&env, &lp_address);
-        lp_client.receive_repayment(
-            &env.current_contract_address(),
-            &principal_paid,
-            &interest_paid
-                .checked_add(fee_paid)
-                .and_then(|v| v.checked_add(late_fee_paid))
-                .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Overflow)),
-        );
+        let interest_and_fees = interest_paid
+            .checked_add(fee_paid)
+            .and_then(|v| v.checked_add(late_fee_paid))
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Overflow));
+        let pool_repay_total = principal_paid
+            .checked_add(interest_and_fees)
+            .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::Overflow));
+
+        if pool_repay_total > 0 {
+            Self::authorize_token_transfer(&env, &token_address, &lp_address, pool_repay_total);
+            let lp_client = LiquidityPoolContractClient::new(&env, &lp_address);
+            lp_client.receive_repayment(
+                &env.current_contract_address(),
+                &principal_paid,
+                &interest_and_fees,
+                &pool_unlock,
+            );
+        }
 
         if is_fully_repaid {
             token_client.transfer(

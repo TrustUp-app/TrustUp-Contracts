@@ -54,7 +54,7 @@ impl MockLiquidityPool {
 
     pub fn fund_loan(_env: Env, _creditline: Address, _merchant: Address, _amount: i128) {}
 
-    pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128) {}
+    pub fn receive_repayment(_env: Env, _from: Address, _amount: i128, _fee: i128, _unlock: i128) {}
 
     pub fn receive_guarantee(_env: Env, _from: Address, _amount: i128) {}
 }
@@ -2312,6 +2312,8 @@ fn test_real_asset_transfers_on_create_and_repay() {
     assert_eq!(t.balance(&merchant), merchant_balance_before + 800);
     assert_eq!(t.balance(&t.creditline_id), creditline_balance_before + 200);
     assert_eq!(t.balance(&t.pool.address), pool_balance_before - 800);
+    assert_eq!(t.pool.get_pool_stats().locked_liquidity, 800);
+    assert_eq!(t.creditline.get_loan(&loan_id).guarantee_amount, 200);
 
     let pool_balance_after_loan = t.balance(&t.pool.address);
     let loan_before_repay = t.creditline.get_loan(&loan_id);
@@ -2331,6 +2333,39 @@ fn test_real_asset_transfers_on_create_and_repay() {
     let loan = t.creditline.get_loan(&loan_id);
     assert_eq!(loan.status, LoanStatus::Repaid);
     assert_eq!(loan.remaining_balance, 0);
+    assert_eq!(t.pool.get_pool_stats().locked_liquidity, 0);
+}
+
+#[test]
+fn test_full_repay_leaves_other_loan_locked() {
+    let t = RealIntegrationCtx::setup();
+    let provider = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+
+    t.fund_pool(&provider, 20_000);
+    t.register_merchant(&merchant, "Two Loan Merchant");
+    t.set_score(&user, 90);
+    t.mint(&user, 10_000);
+
+    let due_date = t.env.ledger().timestamp() + 10_000;
+    let schedule = t.single_installment(1_000, due_date);
+    let loan_a = t
+        .creditline
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+    let loan_b = t
+        .creditline
+        .create_loan(&user, &merchant, &1_000, &200, &schedule);
+
+    assert_eq!(t.pool.get_pool_stats().locked_liquidity, 1_600);
+
+    let due_a = t.creditline.get_loan(&loan_a).remaining_balance;
+    t.creditline.repay_loan(&user, &loan_a, &due_a);
+    assert_eq!(t.pool.get_pool_stats().locked_liquidity, 800);
+
+    let due_b = t.creditline.get_loan(&loan_b).remaining_balance;
+    t.creditline.repay_loan(&user, &loan_b, &due_b);
+    assert_eq!(t.pool.get_pool_stats().locked_liquidity, 0);
 }
 
 #[test]
@@ -2391,7 +2426,7 @@ fn test_end_to_end_happy_path_across_all_contracts() {
     assert_eq!(t.reputation.get_score(&user), 95); // early repayment: +15 (80 → 95)
 
     t.mint(&t.creditline_id, 100);
-    t.pool.receive_repayment(&t.creditline_id, &0, &100);
+    t.pool.receive_repayment(&t.creditline_id, &0, &100, &0);
 
     let stats_after_interest = t.pool.get_pool_stats();
     assert!(stats_after_interest.share_price > share_price_before);

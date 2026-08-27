@@ -104,9 +104,11 @@ fn assert_invariants(setup: &TestEnv, providers: &[Address], active_loans: &[u64
             std::panic::catch_unwind(AssertUnwindSafe(|| setup.creditline.get_loan(&loan_id)))
         {
             if loan.status == LoanStatus::Active {
-                let pool_locked_for_loan = loan
-                    .principal_outstanding
-                    .saturating_sub(loan.guarantee_amount);
+                let pool_locked_for_loan = if loan.principal_outstanding > loan.guarantee_amount {
+                    loan.principal_outstanding - loan.guarantee_amount
+                } else {
+                    0
+                };
                 sum_active_pool_locked += pool_locked_for_loan;
             }
         }

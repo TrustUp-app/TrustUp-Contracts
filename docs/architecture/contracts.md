@@ -277,7 +277,7 @@ pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amo
 
 // CreditLine operations (restricted)
 pub fn fund_loan(env: Env, creditline: Address, merchant: Address, amount: i128)
-pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128)
+pub fn receive_repayment(env: Env, creditline: Address, principal: i128, interest: i128, unlock: i128)
 pub fn receive_guarantee(env: Env, creditline: Address, amount: i128)
 pub fn distribute_interest(env: Env, caller: Address, interest_amount: i128)
 
