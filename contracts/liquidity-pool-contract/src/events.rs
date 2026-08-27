@@ -8,6 +8,7 @@ const GUARANTEE_RCV: Symbol = symbol_short!("LQGUART");
 const INTEREST_DIST: Symbol = symbol_short!("LQINTDST");
 const SHARE_TRANSFER: Symbol = symbol_short!("LQXFER");
 const APPROVAL: Symbol = symbol_short!("LQAPPRV");
+const RATE_PARAMS_SET: Symbol = symbol_short!("LQRATE");
 
 /// Emitted when a liquidity provider deposits tokens
 pub fn emit_liquidity_deposited(env: &Env, provider: &Address, amount: i128, shares_issued: i128) {
@@ -59,6 +60,25 @@ pub fn emit_interest_distributed(
 /// Emitted when LP shares change owner via `transfer` or `transfer_from`
 pub fn emit_share_transferred(env: &Env, from: &Address, to: &Address, amount: i128) {
     env.events().publish((SHARE_TRANSFER, from, to), amount);
+}
+
+/// Emitted when governance updates the utilization-based rate curve parameters
+pub fn emit_rate_params_updated(
+    env: &Env,
+    base_rate_bps: i128,
+    slope1_bps: i128,
+    slope2_bps: i128,
+    optimal_utilization_bps: i128,
+) {
+    env.events().publish(
+        (RATE_PARAMS_SET,),
+        (
+            base_rate_bps,
+            slope1_bps,
+            slope2_bps,
+            optimal_utilization_bps,
+        ),
+    );
 }
 
 /// Emitted when an owner sets a spender's allowance over their LP shares

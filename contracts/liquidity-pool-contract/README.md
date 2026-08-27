@@ -12,6 +12,31 @@ protocol treasury and 5% to the merchant incentive fund.
 Shares are a **fungible, pool-wide claim**: one share is worth
 `total_liquidity / total_shares` tokens, and is never tied to a specific loan.
 
+## Utilization-based interest rate model
+
+The pool computes a **dynamic borrow rate** from its own utilization using an
+Aave-style *kinked* curve. Utilization is `locked_liquidity / total_liquidity`
+and every value is basis points (10000 = 100%). The curve has a kink at
+`optimal_utilization`: below it the rate rises gently with `slope1`, above it
+steeply with `slope2`, which pushes back on borrowing as the pool drains.
+
+```text
+u <= optimal:  rate = base + slope1 * u
+u >  optimal:  rate = base + slope1 * optimal + slope2 * (u - optimal)
+```
+(`u` and `optimal` taken as fractions, i.e. bps / 10000)
+
+Parameters are seeded at `initialize` with sensible defaults (base 2%, slope1
++4% to the kink, slope2 +60% after, optimal 80%) and are retunable by governance
+via `set_rate_params` (admin-gated, validated: `0 < optimal < 10000`, non-negative
+base/slopes).
+
+`quote_interest(principal, reputation_discount_bps)` is the wiring point for
+`creditline-contract`: it applies the current utilization rate to `principal`,
+then subtracts CreditLine's reputation-based discount, floored at `base_rate` so
+a discount can never price a loan below the pool's base cost. This replaces the
+legacy fixed `base_interest_bps` path (previously the pool never computed a rate).
+
 ## Transferable LP shares (secondary market)
 
 LP positions are transferable. Instead of being forced to `withdraw` — which is
@@ -96,6 +121,14 @@ pub fn set_merchant_fund(env: Env, admin: Address, merchant_fund: Address)
 pub fn set_admin(env: Env, admin: Address, new_admin: Address)
 pub fn pause(env: Env, admin: Address)
 pub fn unpause(env: Env, admin: Address)
+pub fn set_rate_params(env: Env, admin: Address, base_rate_bps: i128, slope1_bps: i128, slope2_bps: i128, optimal_utilization_bps: i128)
+
+// Interest rate model
+pub fn get_rate_params(env: Env) -> RateParams
+pub fn get_utilization_bps(env: Env) -> i128            // current utilization (bps)
+pub fn get_current_rate_bps(env: Env) -> i128           // rate at current utilization (bps)
+pub fn quote_rate_bps(env: Env, utilization_bps: i128) -> i128  // rate at a hypothetical utilization
+pub fn quote_interest(env: Env, principal: i128, reputation_discount_bps: i128) -> i128
 
 // LP operations
 pub fn deposit(env: Env, provider: Address, amount: i128) -> i128   // returns shares issued
@@ -132,6 +165,7 @@ pub fn is_paused(env: Env) -> bool
 | `ADMIN`, `TOKEN`, `CRDTLIN`, `TREASURY`, `MRCHFND` | instance | configured addresses |
 | `TOTSHRS`, `TOTLIQ`, `LCKDLIQ` | instance | pool totals |
 | `LOCKED`, `PAUSED` | instance | reentrancy guard, pause flag |
+| `RATEPARM` | instance | `RateParams { base_rate_bps, slope1_bps, slope2_bps, optimal_utilization_bps }` |
 | `(LPSHRS, Address)` | persistent | shares owned by a provider |
 | `(LPALLOW, AllowanceKey)` | temporary | `AllowanceValue { amount, expiration_ledger }` |
 
@@ -157,6 +191,7 @@ outlive it.
 | 12 | `ContractPaused` | Operation attempted while paused |
 | 13 | `InsufficientAllowance` | `transfer_from` exceeds (or has no) live allowance |
 | 14 | `InvalidExpirationLedger` | Approval expires in the past or beyond the max entry TTL |
+| 15 | `InvalidRateParams` | Rate curve params invalid (`optimal` outside `0 < x < 10000`, or negative base/slope) |
 
 ## Testing
 

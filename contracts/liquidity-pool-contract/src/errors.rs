@@ -18,4 +18,5 @@ pub enum LiquidityPoolError {
     ContractPaused = 12,
     InsufficientAllowance = 13,
     InvalidExpirationLedger = 14,
+    InvalidRateParams = 15,
 }
