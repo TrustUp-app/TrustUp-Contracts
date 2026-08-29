@@ -27,4 +27,5 @@ pub enum CreditLineError {
     ParametersUnavailable = 20,
     ReentrancyDetected = 21,
     LoanInGracePeriod = 22,
+    ContractPaused = 23,
 }

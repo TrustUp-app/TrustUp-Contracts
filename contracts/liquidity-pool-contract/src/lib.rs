@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, token, Address, Env, IntoVal, Symbol,
+};
 
 mod access;
 mod errors;
@@ -87,6 +89,16 @@ impl LiquidityPoolContract {
         storage::get_admin(&env)
     }
 
+    pub fn set_parameters_contract(env: Env, admin: Address, address: Address) {
+        admin.require_auth();
+        access::require_admin(&env, &admin);
+        storage::set_parameters_contract(&env, &address);
+    }
+
+    pub fn get_parameters_contract(env: Env) -> Option<Address> {
+        storage::get_parameters_contract(&env)
+    }
+
     pub fn pause(env: Env, admin: Address) {
         admin.require_auth();
         access::require_admin(&env, &admin);
@@ -100,7 +112,23 @@ impl LiquidityPoolContract {
     }
 
     pub fn is_paused(env: Env) -> bool {
-        storage::is_paused(&env)
+        if storage::is_paused(&env) {
+            return true;
+        }
+        if let Some(params_addr) = storage::get_parameters_contract(&env) {
+            let is_paused: bool = env
+                .try_invoke_contract::<bool, soroban_sdk::Error>(
+                    &params_addr,
+                    &Symbol::new(&env, "is_paused"),
+                    ().into_val(&env),
+                )
+                .unwrap_or(Ok(false))
+                .unwrap_or(false);
+            if is_paused {
+                return true;
+            }
+        }
+        false
     }
 
     // -------------------------------------------------------------------------
@@ -815,7 +843,7 @@ impl LiquidityPoolContract {
     }
 
     fn require_not_paused(env: &Env) {
-        if storage::is_paused(env) {
+        if Self::is_paused(env.clone()) {
             panic_with_error!(env, LiquidityPoolError::ContractPaused);
         }
     }

@@ -1,4 +1,5 @@
 use crate::{LiquidityPoolContract, LiquidityPoolContractClient};
+use parameters_contract::{ParametersContract, ParametersContractClient};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
@@ -2555,6 +2556,54 @@ fn test_receive_guarantee_blocked_when_paused() {
     t.client().pause(&t.admin);
     t.mint(&t.creditline, 100);
     t.client().receive_guarantee(&t.creditline, &100);
+}
+
+#[test]
+fn test_governed_pause_blocks_liquidity_pool_operations() {
+    let t = TestEnv::setup();
+    let parameters_id = t.env.register(ParametersContract, ());
+    let parameters = ParametersContractClient::new(&t.env, &parameters_id);
+    parameters.initialize_defaults(&t.admin);
+
+    t.client().set_parameters_contract(&t.admin, &parameters_id);
+    assert!(!t.client().is_paused());
+
+    let signer1 = Address::generate(&t.env);
+    let signer2 = Address::generate(&t.env);
+    let mut signers = Vec::new(&t.env);
+    signers.push_back(signer1.clone());
+    signers.push_back(signer2.clone());
+
+    parameters.migrate_to_multisig(&t.admin, &signers, &2, &0);
+    let proposal_id = parameters.propose_pause(&signer1, &true);
+    parameters.approve_proposal(&signer2, &proposal_id);
+    parameters.execute_proposal(&t.admin, &proposal_id);
+
+    assert!(parameters.is_paused());
+    assert!(t.client().is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #12)")]
+fn test_deposit_blocked_when_governed_paused() {
+    let t = TestEnv::setup();
+    let parameters_id = t.env.register(ParametersContract, ());
+    let parameters = ParametersContractClient::new(&t.env, &parameters_id);
+    parameters.initialize_defaults(&t.admin);
+
+    t.client().set_parameters_contract(&t.admin, &parameters_id);
+
+    let signer1 = Address::generate(&t.env);
+    let mut signers = Vec::new(&t.env);
+    signers.push_back(signer1.clone());
+
+    parameters.migrate_to_multisig(&t.admin, &signers, &1, &0);
+    let proposal_id = parameters.propose_pause(&signer1, &true);
+    parameters.execute_proposal(&t.admin, &proposal_id);
+
+    let provider = Address::generate(&t.env);
+    t.mint(&provider, 1_000);
+    t.client().deposit(&provider, &1_000);
 }
 
 // ─── distribute_interest public entrypoint (SC-17) ───────────────────────────

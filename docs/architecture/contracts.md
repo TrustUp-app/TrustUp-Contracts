@@ -262,8 +262,9 @@ pub struct PoolStats {
 
 **Public API**:
 ```rust
-// Initialization
+// Initialization & Admin
 pub fn initialize(env: Env, admin: Address, token: Address, treasury: Address, merchant_fund: Address)
+pub fn set_parameters_contract(env: Env, admin: Address, address: Address)
 
 // LP operations
 pub fn deposit(env: Env, provider: Address, amount: i128) -> i128  // Returns shares
@@ -574,11 +575,7 @@ on execution of an `UpdateParameters` proposal).
 - Legacy single-admin update path is hard-disabled once governance is active,
   so there is no unguarded fallback once a protocol has migrated
 
-**What it does *not* do**: it does not itself gate other contracts' functions —
-contracts that want to honor the pause flag must call `is_paused` (as
-`liquidity-pool-contract`'s own `pause`/`unpause` did previously with its local
-flag) or be wired through the `adapter-trustless-contract` for cross-contract
-enforcement.
+**Cross-Contract Pause Wiring**: Emergency pause state is governed on `parameters-contract` via multi-sig `propose_pause`/`execute_proposal`. Both `liquidity-pool-contract` and `creditline-contract` wire to `parameters-contract` via `set_parameters_contract` and query `is_paused()` on all value-moving operations. `liquidity-pool-contract` additionally retains its local admin-only pause as an instant emergency fallback (defense-in-depth).
 
 ---
 
