@@ -14,6 +14,7 @@ pub const MERCHANT_FUND_KEY: Symbol = symbol_short!("MRCHFND");
 pub const REENTRANCY_LOCK_KEY: Symbol = symbol_short!("LOCKED");
 pub const PAUSED_KEY: Symbol = symbol_short!("PAUSED");
 pub const RATE_PARAMS_KEY: Symbol = symbol_short!("RATEPARM");
+pub const PARAMETERS_CONTRACT_KEY: Symbol = symbol_short!("PARAMS");
 
 // Persistent storage key prefix for LP shares
 pub const LP_SHARES_PREFIX: Symbol = symbol_short!("LPSHRS");
@@ -247,4 +248,14 @@ pub fn is_paused(env: &Env) -> bool {
 
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&PAUSED_KEY, &paused);
+}
+
+// --- Parameters Contract ---
+
+pub fn get_parameters_contract(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&PARAMETERS_CONTRACT_KEY)
+}
+
+pub fn set_parameters_contract(env: &Env, address: &Address) {
+    env.storage().instance().set(&PARAMETERS_CONTRACT_KEY, address);
 }

@@ -57,6 +57,7 @@ impl CreditLineContract {
         repayment_schedule: Vec<RepaymentInstallment>,
     ) -> u64 {
         user.require_auth();
+        Self::require_not_paused(&env);
 
         Self::validate_guarantee(&env, total_amount, guarantee_amount);
         Self::validate_merchant(&env, &merchant);
@@ -108,6 +109,7 @@ impl CreditLineContract {
         repayment_schedule: Vec<RepaymentInstallment>,
     ) -> u64 {
         user.require_auth();
+        Self::require_not_paused(&env);
 
         Self::validate_guarantee(&env, total_amount, guarantee_amount);
         let score = Self::validate_reputation(&env, &user);
@@ -190,10 +192,38 @@ impl CreditLineContract {
         storage::set_liquidity_pool(&env, &address);
     }
 
+    pub fn get_parameters_contract(env: Env) -> Option<Address> {
+        storage::get_parameters_contract(&env)
+    }
+
     pub fn set_parameters_contract(env: Env, admin: Address, address: Address) {
         admin.require_auth();
         access::require_admin(&env, &admin);
         storage::set_parameters_contract(&env, &address);
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        Self::is_paused_internal(&env)
+    }
+
+    fn is_paused_internal(env: &Env) -> bool {
+        if let Some(address) = storage::get_parameters_contract(env) {
+            env.try_invoke_contract::<bool, soroban_sdk::Error>(
+                &address,
+                &Symbol::new(env, "is_paused"),
+                ().into_val(env),
+            )
+            .unwrap_or(Ok(false))
+            .unwrap_or(false)
+        } else {
+            false
+        }
+    }
+
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused_internal(env) {
+            panic_with_error!(env, CreditLineError::ContractPaused);
+        }
     }
 
     fn validate_guarantee(env: &Env, total_amount: i128, guarantee_amount: i128) {
@@ -403,6 +433,10 @@ impl CreditLineContract {
     /// `LoanNotActive` if the loan is not active.  Returns `Ok(())` when the
     /// warning event was successfully emitted (i.e. the loan is in the grace window).
     pub fn warn_grace_period(env: Env, loan_id: u64) -> Result<(), CreditLineError> {
+        if Self::is_paused_internal(&env) {
+            return Err(CreditLineError::ContractPaused);
+        }
+
         let loan = storage::read_loan(&env, loan_id).ok_or(CreditLineError::LoanNotFound)?;
 
         if loan.status != LoanStatus::Active {
@@ -442,6 +476,10 @@ impl CreditLineContract {
     }
 
     pub fn mark_defaulted(env: Env, loan_id: u64) -> Result<(), CreditLineError> {
+        if Self::is_paused_internal(&env) {
+            return Err(CreditLineError::ContractPaused);
+        }
+
         let mut loan = storage::read_loan(&env, loan_id).ok_or(CreditLineError::LoanNotFound)?;
 
         if loan.status != LoanStatus::Active {
@@ -516,6 +554,7 @@ impl CreditLineContract {
 
     pub fn cancel_loan(env: Env, caller: Address, loan_id: u64) {
         caller.require_auth();
+        Self::require_not_paused(&env);
 
         let mut loan = storage::read_loan(&env, loan_id)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::LoanNotFound));
@@ -545,6 +584,7 @@ impl CreditLineContract {
 
     pub fn repay_loan(env: Env, borrower: Address, loan_id: u64, amount: i128) -> i128 {
         borrower.require_auth();
+        Self::require_not_paused(&env);
 
         let mut loan = storage::read_loan(&env, loan_id)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::LoanNotFound));
@@ -785,6 +825,8 @@ impl CreditLineContract {
     /// `LOANLTFE` event when fees are accrued; is a no-op when no full day has
     /// elapsed since the last accrual or when no installment is overdue.
     pub fn apply_late_fees(env: Env, loan_id: u64) {
+        Self::require_not_paused(&env);
+
         let mut loan = storage::read_loan(&env, loan_id)
             .unwrap_or_else(|| panic_with_error!(&env, CreditLineError::LoanNotFound));
 

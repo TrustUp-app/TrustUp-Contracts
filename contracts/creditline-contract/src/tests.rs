@@ -3004,3 +3004,67 @@ fn test_default_decreases_score_while_full_repayment_increases_score() {
         "default must decrease reputation score"
     );
 }
+
+#[test]
+fn test_governed_pause_blocks_creditline_operations() {
+    let t = TestCtx::setup();
+    assert!(!t.creditline.is_paused());
+
+    let signer1 = Address::generate(&t.env);
+    let signer2 = Address::generate(&t.env);
+    let mut signers = Vec::new(&t.env);
+    signers.push_back(signer1.clone());
+    signers.push_back(signer2.clone());
+
+    t.parameters.migrate_to_multisig(&t.admin, &signers, &2, &0);
+    let proposal_id = t.parameters.propose_pause(&signer1, &true);
+    t.parameters.approve_proposal(&signer2, &proposal_id);
+    t.parameters.execute_proposal(&t.admin, &proposal_id);
+
+    assert!(t.parameters.is_paused());
+    assert!(t.creditline.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #23)")]
+fn test_create_loan_blocked_when_governed_paused() {
+    let t = TestCtx::setup();
+    let borrower = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.setup_merchant(&merchant, true);
+
+    let signer1 = Address::generate(&t.env);
+    let mut signers = Vec::new(&t.env);
+    signers.push_back(signer1.clone());
+
+    t.parameters.migrate_to_multisig(&t.admin, &signers, &1, &0);
+    let proposal_id = t.parameters.propose_pause(&signer1, &true);
+    t.parameters.execute_proposal(&t.admin, &proposal_id);
+
+    let schedule = t.sample_schedule(100);
+    t.creditline.create_loan(&borrower, &merchant, &100, &10, &schedule);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #23)")]
+fn test_repay_loan_blocked_when_governed_paused() {
+    let t = TestCtx::setup();
+    let borrower = Address::generate(&t.env);
+    let merchant = Address::generate(&t.env);
+    t.setup_merchant(&merchant, true);
+    t.reputation.set_score(&t.admin, &borrower, &80);
+    t.mint(&borrower, 1_000);
+
+    let schedule = t.sample_schedule(100);
+    let loan_id = t.creditline.create_loan(&borrower, &merchant, &100, &10, &schedule);
+
+    let signer1 = Address::generate(&t.env);
+    let mut signers = Vec::new(&t.env);
+    signers.push_back(signer1.clone());
+
+    t.parameters.migrate_to_multisig(&t.admin, &signers, &1, &0);
+    let proposal_id = t.parameters.propose_pause(&signer1, &true);
+    t.parameters.execute_proposal(&t.admin, &proposal_id);
+
+    t.creditline.repay_loan(&borrower, &loan_id, &50);
+}
