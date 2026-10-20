@@ -3007,7 +3007,7 @@ fn test_default_decreases_score_while_full_repayment_increases_score() {
 
 #[test]
 fn test_governed_pause_blocks_creditline_operations() {
-    let t = TestCtx::setup();
+    let t = RealIntegrationCtx::setup();
     assert!(!t.creditline.is_paused());
 
     let signer1 = Address::generate(&t.env);
@@ -3028,10 +3028,12 @@ fn test_governed_pause_blocks_creditline_operations() {
 #[test]
 #[should_panic(expected = "Error(Contract, #23)")]
 fn test_create_loan_blocked_when_governed_paused() {
-    let t = TestCtx::setup();
+    let t = RealIntegrationCtx::setup();
     let borrower = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
-    t.setup_merchant(&merchant, true);
+    t.register_merchant(&merchant, "Paused Merchant");
+    t.set_score(&borrower, 80);
+    t.mint(&borrower, 1_000);
 
     let signer1 = Address::generate(&t.env);
     let mut signers = Vec::new(&t.env);
@@ -3041,22 +3043,26 @@ fn test_create_loan_blocked_when_governed_paused() {
     let proposal_id = t.parameters.propose_pause(&signer1, &true);
     t.parameters.execute_proposal(&t.admin, &proposal_id);
 
-    let schedule = t.sample_schedule(100);
-    t.creditline.create_loan(&borrower, &merchant, &100, &10, &schedule);
+    let schedule = t.single_installment(100, t.env.ledger().timestamp() + 10_000);
+    t.creditline
+        .create_loan(&borrower, &merchant, &100, &20, &schedule);
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #23)")]
 fn test_repay_loan_blocked_when_governed_paused() {
-    let t = TestCtx::setup();
+    let t = RealIntegrationCtx::setup();
     let borrower = Address::generate(&t.env);
     let merchant = Address::generate(&t.env);
-    t.setup_merchant(&merchant, true);
-    t.reputation.set_score(&t.admin, &borrower, &80);
+    t.fund_pool(&Address::generate(&t.env), 10_000);
+    t.register_merchant(&merchant, "Paused Merchant");
+    t.set_score(&borrower, 80);
     t.mint(&borrower, 1_000);
 
-    let schedule = t.sample_schedule(100);
-    let loan_id = t.creditline.create_loan(&borrower, &merchant, &100, &10, &schedule);
+    let schedule = t.single_installment(100, t.env.ledger().timestamp() + 10_000);
+    let loan_id = t
+        .creditline
+        .create_loan(&borrower, &merchant, &100, &20, &schedule);
 
     let signer1 = Address::generate(&t.env);
     let mut signers = Vec::new(&t.env);
